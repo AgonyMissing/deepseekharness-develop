@@ -246,7 +246,6 @@ const WEBUI_FAMILY_ROWS = [
   ['web-ui-dsh-aionui-panel', '@linxin666/dsh-client-ui-aionui-panel'],
   ['web-ui-task-board', '@linxin666/dsh-client-ui-task-board'],
   ['web-ui-git-graph', '@linxin666/dsh-client-ui-git-graph'],
-  ['web-ui-pet', '@linxin666/dsh-pet'],
   ['web-ui-ssh', '@linxin666/dsh-ssh'],
   ['web-ui-describe-image', '@linxin666/dsh-tool-describe-image'],
   ['web-ui-liangshen', '@linxin666/dsh-liangshen'],
@@ -338,8 +337,24 @@ function ensureAquaPlugin() {
 }
 
 function ensureWebUiFamily() {
+  // Migration first: drop the removed pet plugin from already-initialized
+  // profiles (the fresh-machine crash "no valid pet manifests found" came
+  // from the pet row loading with no bundled pet assets). Kept independent
+  // of the module copy below so a copy failure can never block the fix.
   try {
-    syncBundledWebUiModules()
+    const aggPatch = path.join(WEBUI_PROFILE_NM, '@linxin666', 'dsh-web-ui-all', 'cordis.patch.yml')
+    if (fs.existsSync(aggPatch)) {
+      let agg = fs.readFileSync(aggPatch, 'utf8')
+      const nextAgg = agg.split('\n')
+        .filter(line => !/^\s*- id: web-ui-pet\s*$/.test(line)
+          && !/name:\s*['"]?@linxin666\/dsh-pet/.test(line)
+          && line.trim() !== '# from ../dsh-pet')
+        .join('\n')
+        .replace(/\n{3,}/g, '\n\n')
+      if (nextAgg !== agg) fs.writeFileSync(aggPatch, nextAgg, 'utf8')
+    }
+  } catch { /* aggregate patch is optional */ }
+  try {
     const webPatch = path.join(DSH_HOME, 'profiles', 'web', 'cordis.patch.yml')
     let existing = ''
     try {
@@ -347,20 +362,29 @@ function ensureWebUiFamily() {
     } catch {
       existing = ''
     }
-    if (existing.includes(WEBUI_MARKER_START)) return
     const lines = [WEBUI_MARKER_START, '- insert:']
     for (const [rowId, moduleName] of WEBUI_FAMILY_ROWS) {
       lines.push(`    - id: ${rowId}`)
       lines.push(`      name: ${yamlValue(moduleName)}`)
     }
     lines.push(WEBUI_MARKER_END)
-    const base = existing
+    const head = existing.includes(WEBUI_MARKER_START)
+      ? existing.split(WEBUI_MARKER_START)[0]
+      : existing
+    const tail = existing.includes(WEBUI_MARKER_END)
+      ? existing.split(WEBUI_MARKER_END)[1]
+      : ''
+    const base = head
       .replace(/^\[\]\s*$/gm, '')
       .replace(/\n{3,}/g, '\n\n')
       .trimEnd()
-    const next = (base === '' ? '' : base + '\n\n') + lines.join('\n') + '\n'
+    const next = (base === '' ? '' : base + '\n\n') + lines.join('\n') + '\n' + tail
+    if (next === existing) return
     fs.mkdirSync(path.dirname(webPatch), { recursive: true })
     fs.writeFileSync(webPatch, next, 'utf8')
+  } catch { /* patch layer is optional */ }
+  try {
+    syncBundledWebUiModules()
   } catch {
     // Optional family; the app runs without it.
   }
@@ -764,6 +788,9 @@ body[data-dsh-sidebar-dragging] #root div[style*="grid-template-columns"] > div:
 [class~="nArs4W_toggleCluster"] {
   right: var(--dse-cluster-right, 30px) !important;
   top: calc(var(--dsh-title-bar-strip, 40px) + 11px) !important;
+  /* Same layer as the session header/log, so settings dialogs (rendered in
+     the sidebar stack above it) are never blocked by these two buttons. */
+  z-index: 8 !important;
 }
 /* Keep the header's right-aligned utilities (Session log) clear of the two
    toggle buttons whether the panel is open or collapsed. */
