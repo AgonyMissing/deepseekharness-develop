@@ -762,8 +762,13 @@ body[data-dsh-sidebar-dragging] #root div[style*="grid-template-columns"] > div:
 /* Aqua float layout: keep the top-right panel toggles inside the glass
    header and drop the header's title row below the drag strip. */
 [class~="nArs4W_toggleCluster"] {
-  right: 30px !important;
+  right: var(--dse-cluster-right, 30px) !important;
   top: calc(var(--dsh-title-bar-strip, 40px) + 11px) !important;
+}
+/* Keep the header's right-aligned utilities (Session log) clear of the two
+   toggle buttons whether the panel is open or collapsed. */
+[data-slot="conversation.session.header"] > header {
+  padding-right: 78px !important;
 }
 [class~="wSkVaW_headerUtilities"] {
   margin-right: 8px !important;
@@ -3333,6 +3338,33 @@ async function injectBackgroundWhenReady(win) {
           })
           applyChatFont()
         }
+        var clusterObservedPanel = null
+        var clusterObservedHeader = null
+        function syncToggleCluster() {
+          var cluster = document.querySelector('.nArs4W_toggleCluster')
+          if (!cluster) return
+          var header = document.querySelector('[data-phase] header') || document.querySelector('header')
+          if (!header) return
+          var hr = header.getBoundingClientRect()
+          var right = Math.max(8, Math.round(window.innerWidth - hr.right + 12))
+          cluster.style.setProperty('--dse-cluster-right', right + 'px')
+        }
+        function ensureClusterObserver() {
+          if (!window.__dseClusterRO) {
+            try { window.__dseClusterRO = new ResizeObserver(syncToggleCluster) } catch (e) { return }
+          }
+          var panel = document.querySelector('.nArs4W_panel')
+          var header = document.querySelector('[data-phase] header') || document.querySelector('header')
+          if (panel && panel !== clusterObservedPanel) {
+            window.__dseClusterRO.observe(panel)
+            clusterObservedPanel = panel
+          }
+          if (header && header !== clusterObservedHeader) {
+            window.__dseClusterRO.observe(header)
+            clusterObservedHeader = header
+          }
+          syncToggleCluster()
+        }
         function findWallpaperRow() {
           var dialog = document.querySelector('[class*="VOzbGW_panel"]')
           if (!dialog) return null
@@ -3513,9 +3545,15 @@ async function injectBackgroundWhenReady(win) {
         mountWallpaperBox()
         mountChatFontBox()
         applyChatFont()
+        ensureClusterObserver()
+        if (!window.__dseClusterResize) {
+          window.__dseClusterResize = true
+          window.addEventListener('resize', syncToggleCluster)
+        }
         new MutationObserver(function () {
           mountWallpaperBox()
           mountChatFontBox()
+          ensureClusterObserver()
         }).observe(document.body, { childList: true, subtree: true })
       })()`).catch(() => {}),
     ])
