@@ -38,6 +38,17 @@ let tray = null
 
 /** Per-user dsh home inside the app's own data directory (not ~/.dsh). */
 const DSH_HOME = path.join(app.getPath('userData'), 'dsh-home')
+/** Tray-only start: boot with no visible window (--tray flag or desktop.json
+ * startHidden=true). The local server and remote tunnel keep running, and the
+ * tray icon remains the way back into the window. */
+const HIDDEN_START = process.argv.includes('--tray') || (() => {
+  try {
+    const cfg = JSON.parse(fs.readFileSync(path.join(DSH_HOME, 'desktop.json'), 'utf8'))
+    return cfg.startHidden === true
+  } catch {
+    return false
+  }
+})()
 /** Managed MCP server store + the home-level patch layer they merge into. */
 const MCP_STORE = path.join(DSH_HOME, 'mcp-servers.json')
 const MCP_PATCH = path.join(DSH_HOME, 'cordis.patch.yml')
@@ -716,6 +727,60 @@ body {
   font-weight: 600;
   color: var(--dsw-alias-label-primary, #15171b);
 }
+/* Mobile remote control card inside 设置: shows the local port for
+   intranet tunnelling and reopens the plugin's QR/tunnel panel. */
+.dse-remote-card {
+  width: 100%;
+  margin: 2px 0 8px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid var(--dsw-alias-border-l2, rgba(121, 126, 145, 0.2));
+  background: var(--dsw-alias-bg-layer-2, rgba(255, 255, 255, 0.5));
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.dse-remote-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary, #15171b);
+}
+.dse-remote-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.dse-remote-label {
+  color: var(--dsw-alias-label-secondary, #5b6472);
+  flex: none;
+}
+.dse-remote-code {
+  font-family: var(--dsw-font-mono, ui-monospace, Consolas, monospace);
+  font-size: 12px;
+  color: var(--dsw-alias-brand-primary, #2f54eb);
+  background: var(--dsw-alias-bg-layer-1, rgba(120, 130, 160, 0.12));
+  border-radius: 6px;
+  padding: 2px 6px;
+}
+.dse-remote-hint {
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary, #8a93a2);
+}
+.dse-remote-open {
+  align-self: flex-start;
+  border: 1px solid var(--dsw-alias-border-l2, rgba(121, 126, 145, 0.25));
+  background: var(--dsw-alias-button-elevated-fill, rgba(120, 130, 160, 0.12));
+  color: var(--dsw-alias-label-primary, #15171b);
+  border-radius: 10px;
+  padding: 6px 14px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.dse-remote-open:hover {
+  background: var(--dsw-alias-interactive-bg-hover, rgba(120, 130, 160, 0.2));
+}
 .dse-chat-font-row {
   display: flex;
   align-items: center;
@@ -782,9 +847,8 @@ body[data-dsh-sidebar-dragging] #root div[style*="grid-template-columns"] > div:
      the sidebar stack above it) are never blocked by these two buttons. */
   z-index: 8 !important;
 }
-/* Hide the 0.2.4 bottom-left quick actions (check-for-updates + mobile
-   remote control) — the user summons those from elsewhere or not at all. */
-[class*="fThDlq_entryRow"],
+/* Hide the bottom-left quick actions; the mobile remote control entry now
+   lives inside 设置 (see .dse-remote-card), so no stray buttons remain. */
 button[aria-label="检查更新"],
 button[aria-label="移动端远程控制"] {
   display: none !important;
@@ -2952,6 +3016,9 @@ function startServer() {
       SERVER_ENTRY,
       'web',
       '--port', String(port),
+      // The dsh web command opens the default browser unless told otherwise;
+      // the desktop shell has its own window, so never hand off to a browser.
+      '--no-open',
     ], {
       env: {
         ...process.env,
@@ -3389,6 +3456,25 @@ async function injectBackgroundWhenReady(win) {
           })
           applyChatFont()
         }
+        function mountRemoteCard() {
+          var dialog = document.querySelector('[class*="VOzbGW_panel"]')
+          if (!dialog || dialog.querySelector('.dse-remote-card')) return
+          var anchor = dialog.querySelector('[class*="_8HJdBW_group"]')
+          if (!anchor) return
+          var card = document.createElement('div')
+          card.className = 'dse-remote-card'
+          card.innerHTML =
+            '<div class="dse-remote-title">移动端远程控制</div>' +
+            '<div class="dse-remote-row"><span class="dse-remote-label">本机服务地址</span><code class="dse-remote-code">http://127.0.0.1:17890</code></div>' +
+            '<div class="dse-remote-hint">内网穿透请映射 127.0.0.1:17890</div>' +
+            '<button type="button" class="dse-remote-open">打开远程控制面板</button>'
+          var ref = dialog.querySelector('.dse-chat-font-box') || anchor
+          ref.insertAdjacentElement('afterend', card)
+          card.querySelector('.dse-remote-open').addEventListener('click', function () {
+            var trigger = document.querySelector('button[aria-label="移动端远程控制"]')
+            if (trigger) trigger.click()
+          })
+        }
         var clusterObservedPanel = null
         var clusterObservedHeader = null
         function syncToggleCluster() {
@@ -3595,6 +3681,7 @@ async function injectBackgroundWhenReady(win) {
         }
         mountWallpaperBox()
         mountChatFontBox()
+        mountRemoteCard()
         applyChatFont()
         ensureClusterObserver()
         if (!window.__dseClusterResize) {
@@ -3604,6 +3691,7 @@ async function injectBackgroundWhenReady(win) {
         new MutationObserver(function () {
           mountWallpaperBox()
           mountChatFontBox()
+          mountRemoteCard()
           ensureClusterObserver()
         }).observe(document.body, { childList: true, subtree: true })
       })()`).catch(() => {}),
@@ -3654,7 +3742,9 @@ function createTray() {
       },
     },
   ]))
-  tray.on('click', showMainWindow)
+  // Single-click must stay silent in tray-only mode: a stray click used to
+  // pop the (web-content) main window, which reads as "a webpage opened".
+  // Double-click is the deliberate gesture to open the main window.
   tray.on('double-click', showMainWindow)
 }
 
@@ -3668,6 +3758,7 @@ async function createWindow() {
     title: 'deepseekharness',
     icon: path.join(__dirname, 'build', 'icon.png'),
     backgroundColor: '#ffffff',
+    show: false,
     autoHideMenuBar: true,
     webPreferences: {
       contextIsolation: true,
@@ -3717,6 +3808,7 @@ async function createWindow() {
   })
 
   await mainWindow.loadURL(serverUrl)
+  if (SMOKE || !HIDDEN_START) mainWindow.show()
   await injectThemeGuard(mainWindow)
   if (SMOKE) {
     await injectBackgroundWhenReady(mainWindow)
@@ -3733,7 +3825,9 @@ if (!gotLock) {
   app.quit()
 } else {
   app.on('second-instance', () => {
-    showMainWindow()
+    // In tray-only mode a second launch must stay silent too; the tray icon
+    // is the only way back into the window.
+    if (!HIDDEN_START) showMainWindow()
   })
 
   app.whenReady().then(async () => {
@@ -3749,6 +3843,13 @@ if (!gotLock) {
       const url = await startServer()
       await createWindow()
       createTray()
+      if (HIDDEN_START && tray !== null) {
+        tray.displayBalloon({
+          iconType: 'info',
+          title: 'DeepSeek Harness',
+          content: `已隐藏启动：服务运行在 http://127.0.0.1:${WEBUI_PORT}，双击托盘图标打开主界面。`,
+        })
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       console.error('DSH_START_ERROR', error)

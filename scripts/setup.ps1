@@ -128,4 +128,35 @@ function Update-BetterSidebarDefaults {
 }
 Update-BetterSidebarDefaults (Join-Path $root 'resources\dsh-web-ui\node_modules\dsh-better-sidebar')
 
+# ---------- 5. 移动端远程控制面板：显示本机端口 ----------
+Write-Step '应用移动端远程控制端口显示补丁'
+function Update-RemotePortPatch {
+  param([string]$Path)
+  if (-not (Test-Path $Path)) {
+    Write-Warning "缺少文件: $Path"
+    return
+  }
+  $raw = [IO.File]::ReadAllText($Path)
+  if ($raw.Contains('本机服务地址：http://127.0.0.1:17890')) {
+    Write-Output "already patched: $Path"
+    return
+  }
+  $insert = @'
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
+						className: remote_module_css_default.hint,
+						children: "本机服务地址：http://127.0.0.1:17890（内网穿透请映射 127.0.0.1:17890）"
+					}),
+'@
+  $insert = $insert.TrimEnd("`r", "`n")
+  $anchor = "`t`t`t`t}) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: ["
+  $next = $raw.Replace($anchor, $anchor + "`n" + $insert + "`n")
+  if ($next -eq $raw) {
+    Write-Warning "未能自动匹配远程控制面板位置: $Path（可能需要人工检查）"
+  } else {
+    [IO.File]::WriteAllText($Path, $next)
+    Write-Output "patched: $Path"
+  }
+}
+Update-RemotePortPatch (Join-Path $root 'resources\dsh-web-ui\node_modules\@linxin666\dsh-remote-web-ui\lib\client.js')
+
 Write-Host "`n完成。接下来可以运行 npm run dist 打包，或 npm start 启动开发版。" -ForegroundColor Green
