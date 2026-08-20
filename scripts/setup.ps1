@@ -159,4 +159,39 @@ function Update-RemotePortPatch {
 }
 Update-RemotePortPatch (Join-Path $root 'resources\dsh-web-ui\node_modules\@linxin666\dsh-remote-web-ui\lib\client.js')
 
+Write-Step '应用工作区卫生规则（standard 预设）'
+function Update-WorkspaceHygiene {
+  param([string]$Path)
+  if (-not (Test-Path $Path)) {
+    Write-Warning "缺少文件: $Path"
+    return
+  }
+  $raw = [IO.File]::ReadAllText($Path)
+  $marker = 'Working-directory hygiene (mandatory)'
+  if ($raw.Contains($marker)) {
+    Write-Output "already patched: $Path"
+    return
+  }
+  $anchor = 'You are a coding agent powered by the {{model}} model. Your working directory is {{cwd}}.'
+  $addition = @'
+
+      Working-directory hygiene (mandatory): never create temporary, auxiliary, diagnostic,
+      or intermediate files (logs, scratch scripts, scan reports, backups, encoding/repair
+      scripts, build transcripts) inside the user's project/workspace. Keep anything transient
+      in the system temp directory and delete it after use. Only write files into the workspace
+      when the user explicitly asked for that deliverable. If a build or tool writes artifacts
+      into the workspace (e.g. compile logs, scan outputs), redirect them outside the workspace
+      or remove them immediately. When files must be left, tell the user exactly which files
+      were created and why.
+'@
+  if (-not $raw.Contains($anchor)) {
+    Write-Warning "未找到标准预设锚点: $Path（可能需要人工检查）"
+    return
+  }
+  $next = $raw.Replace($anchor, $anchor + $addition)
+  [IO.File]::WriteAllText($Path, $next)
+  Write-Output "patched: $Path"
+}
+Update-WorkspaceHygiene (Join-Path $root 'resources\dsh\node_modules\@deepseek-ai\dsh\config\agent-presets\standard\agent.cordis.yml')
+
 Write-Host "`n完成。接下来可以运行 npm run dist 打包，或 npm start 启动开发版。" -ForegroundColor Green

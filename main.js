@@ -10,7 +10,7 @@
 'use strict'
 
 const { app, BrowserWindow, dialog, Menu, shell, Tray } = require('electron')
-const { spawn } = require('node:child_process')
+const { spawn, spawnSync } = require('node:child_process')
 const fs = require('node:fs')
 const { createServer } = require('node:http')
 const os = require('node:os')
@@ -35,9 +35,17 @@ let quitting = false
 let dialogServer = null
 let dialogPort = 0
 let tray = null
+let consoleWatchdog = null
+let terminalDelegationBackup = null
 
 /** Per-user dsh home inside the app's own data directory (not ~/.dsh). */
 const DSH_HOME = path.join(app.getPath('userData'), 'dsh-home')
+const TERMINAL_DELEGATION_BACKUP = path.join(DSH_HOME, 'terminal-delegation-backup.json')
+/** AppUserModelID GUIDs that select the classic Windows Console Host as the
+ *  console/terminal delegation target (empty strings do NOT disable the
+ *  Windows Terminal takeover on Windows 11). */
+const CONHOST_DELEGATION_CONSOLE = '{B23D10C0-E52E-411E-9D5B-C09FDF709C7D}'
+const CONHOST_DELEGATION_TERMINAL = '{B23D10C0-E52E-411E-9D5B-C09FDF709C7D}'
 /** Tray-only start: boot with no visible window (--tray flag or desktop.json
  * startHidden=true). The local server and remote tunnel keep running, and the
  * tray icon remains the way back into the window. */
@@ -3011,6 +3019,8 @@ async function restartServerAndReload() {
  */
 function startServer() {
   const launch = (port) => new Promise((resolve, reject) => {
+    const shimPath = path.join(__dirname, 'resources', 'console-hide-shim.cjs')
+    const launcherPath = path.join(__dirname, 'resources', 'hidden-console-launcher.exe')
     const child = spawn(process.execPath, [
       '--expose-internals',
       SERVER_ENTRY,
@@ -3027,6 +3037,12 @@ function startServer() {
         DSH_DESKTOP_DIALOG_PORT: String(dialogPort),
         DSH_TELEMETRY_DISABLED: '1',
         DSH_PERMISSION_MODE: process.env.DSH_PERMISSION_MODE || 'workspace-write',
+        // Every descendant Node process (background workers, subagents, MCP
+        // servers, npx) loads the console-hiding shim; console shells are
+        // routed through the hidden-console launcher so no black window can
+        // flash even from nested spawns.
+        DSH_HIDE_LAUNCHER: launcherPath,
+        NODE_OPTIONS: [process.env.NODE_OPTIONS, `--require=${shimPath}`].filter(Boolean).join(' '),
       },
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
@@ -3748,6 +3764,103 @@ function createTray() {
   tray.on('double-click', showMainWindow)
 }
 
+/** Hide any stray console window created anywhere inside the app process tree. */
+function startConsoleWatchdog() {
+  if (process.platform !== 'win32' || consoleWatchdog !== null) return
+  const exe = path.join(__dirname, 'resources', 'console-watchdog.exe')
+  if (!fs.existsSync(exe)) return
+  try {
+    consoleWatchdog = spawn(exe, [String(process.pid), __dirname], {
+      stdio: 'ignore',
+      windowsHide: true,
+    })
+    consoleWatchdog.on('exit', () => {
+      consoleWatchdog = null
+    })
+  } catch {
+    consoleWatchdog = null
+  }
+}
+
+/** Read one console-delegation registry value; null when absent. */
+function readDelegationValue(name) {
+  try {
+    const result = spawnSync('reg', ['query', 'HKCU\\Console\\%%Startup', '/v', name], { encoding: 'utf8', windowsHide: true })
+    if (result.status !== 0) return null
+    const match = /REG_SZ\s+(.*)$/m.exec(result.stdout || '')
+    return match ? match[1].trim() : ''
+  } catch {
+    return null
+  }
+}
+
+function writeDelegationValue(name, value) {
+  try {
+    spawnSync('reg', ['add', 'HKCU\\Console\\%%Startup', '/v', name, '/t', 'REG_SZ', '/d', value, '/f'], {
+      stdio: 'ignore',
+      windowsHide: true,
+    })
+  } catch {}
+}
+
+function deleteDelegationValue(name) {
+  try {
+    spawnSync('reg', ['delete', 'HKCU\\Console\\%%Startup', '/v', name, '/f'], {
+      stdio: 'ignore',
+      windowsHide: true,
+    })
+  } catch {}
+}
+
+/**
+ * While the desktop app runs, point console delegation at the classic conhost
+ * (empty Delegation* values) instead of Windows Terminal. Windows Terminal
+ * ignores SW_HIDE and pops a window for every sandboxed command console;
+ * conhost honors the hidden STARTUPINFO window. The original values are backed
+ * up (also on disk for crash recovery) and restored on quit.
+ */
+function applyConhostDelegation() {
+  if (process.platform !== 'win32') return
+  try {
+    if (fs.existsSync(TERMINAL_DELEGATION_BACKUP)) {
+      // Previous run exited uncleanly: restore its backup before continuing.
+      const previous = JSON.parse(fs.readFileSync(TERMINAL_DELEGATION_BACKUP, 'utf8'))
+      if (previous.hadConsole) writeDelegationValue('DelegationConsole', previous.console)
+      else deleteDelegationValue('DelegationConsole')
+      if (previous.hadTerminal) writeDelegationValue('DelegationTerminal', previous.terminal)
+      else deleteDelegationValue('DelegationTerminal')
+      fs.unlinkSync(TERMINAL_DELEGATION_BACKUP)
+    }
+    const consoleValue = readDelegationValue('DelegationConsole')
+    const terminalValue = readDelegationValue('DelegationTerminal')
+    if (consoleValue === CONHOST_DELEGATION_CONSOLE && terminalValue === CONHOST_DELEGATION_TERMINAL) return
+    terminalDelegationBackup = {
+      console: consoleValue,
+      terminal: terminalValue,
+      hadConsole: consoleValue !== null,
+      hadTerminal: terminalValue !== null,
+    }
+    fs.mkdirSync(DSH_HOME, { recursive: true })
+    fs.writeFileSync(TERMINAL_DELEGATION_BACKUP, JSON.stringify(terminalDelegationBackup))
+    writeDelegationValue('DelegationConsole', CONHOST_DELEGATION_CONSOLE)
+    writeDelegationValue('DelegationTerminal', CONHOST_DELEGATION_TERMINAL)
+  } catch {}
+}
+
+function restoreConhostDelegation() {
+  if (process.platform !== 'win32') return
+  try {
+    if (terminalDelegationBackup !== null) {
+      if (terminalDelegationBackup.hadConsole) writeDelegationValue('DelegationConsole', terminalDelegationBackup.console)
+      else deleteDelegationValue('DelegationConsole')
+      if (terminalDelegationBackup.hadTerminal) writeDelegationValue('DelegationTerminal', terminalDelegationBackup.terminal)
+      else deleteDelegationValue('DelegationTerminal')
+      terminalDelegationBackup = null
+    }
+    if (fs.existsSync(TERMINAL_DELEGATION_BACKUP)) fs.unlinkSync(TERMINAL_DELEGATION_BACKUP)
+  } catch {}
+}
+
 /** Open the main window against the running server. */
 async function createWindow() {
   mainWindow = new BrowserWindow({
@@ -3832,6 +3945,7 @@ if (!gotLock) {
 
   app.whenReady().then(async () => {
     try {
+      applyConhostDelegation()
       seedDshHome()
       seedChibiSprite()
       seedWallpapers()
@@ -3843,6 +3957,7 @@ if (!gotLock) {
       const url = await startServer()
       await createWindow()
       createTray()
+      startConsoleWatchdog()
       if (HIDDEN_START && tray !== null) {
         tray.displayBalloon({
           iconType: 'info',
@@ -3865,6 +3980,11 @@ if (!gotLock) {
   app.on('before-quit', () => {
     if (quitting) return
     quitting = true
+    if (consoleWatchdog !== null) {
+      consoleWatchdog.kill()
+      consoleWatchdog = null
+    }
+    restoreConhostDelegation()
     if (tray !== null) {
       tray.destroy()
       tray = null

@@ -8,33 +8,11 @@
  */
 'use strict'
 
-const cp = require('node:child_process')
 const path = require('node:path')
 
-const isOptions = (value) =>
-  value !== null && typeof value === 'object' && !Array.isArray(value) && !Buffer.isBuffer(value)
-
-const patchChildProcess = (name) => {
-  const original = cp[name]
-  cp[name] = function (...args) {
-    // Patch the first options-like argument when present.
-    for (let index = args.length - 1; index >= 0; index--) {
-      if (isOptions(args[index])) {
-        if (args[index].windowsHide === undefined) args[index].windowsHide = true
-        return original.apply(this, args)
-      }
-    }
-    // No options object: insert one before a trailing callback, or append it.
-    const last = args[args.length - 1]
-    if (typeof last === 'function') args.splice(args.length - 1, 0, { windowsHide: true })
-    else args.push({ windowsHide: true })
-    return original.apply(this, args)
-  }
-}
-
-for (const name of ['spawn', 'spawnSync', 'exec', 'execSync', 'execFile', 'execFileSync', 'fork']) {
-  patchChildProcess(name)
-}
+// Install the shared console-hiding patch (also loaded via NODE_OPTIONS in
+// every descendant Node process; require cache dedupes the double load).
+require('./console-hide-shim.cjs')
 
 const dshEntry = path.join(__dirname, 'dsh', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')
 import('file://' + dshEntry.replace(/\\/g, '/')).catch((error) => {
