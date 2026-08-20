@@ -4,6 +4,6 @@
   "private": true,
   "description": "Bundled DeepSeek Harness runtime (installed artifacts; do not edit)",
   "dependencies": {
-    "@deepseek-ai/dsh": "^0.1.0-rc.6"
+    "@deepseek-ai/dsh": "^0.1.0-rc.8"
   }
 }

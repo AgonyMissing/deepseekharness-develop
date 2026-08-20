@@ -3834,7 +3834,7 @@ void main() {
 			};
 			ctx.slots.inject("settings.plugin.item", () => ctx.slots.register({
 				name: "settings.plugin.item",
-				id: "aqua",
+				key: "aqua",
 				order: 5,
 				store: pluginStore,
 				locale: NS,
