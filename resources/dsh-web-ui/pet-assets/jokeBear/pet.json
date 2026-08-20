@@ -1,0 +1,7 @@
+{
+  "id": "jokebear-codexpet",
+  "displayName": "JokeBear-CodexPet",
+  "description": "An unofficial Codex desktop-pet fan adaptation based on JokeBear, an IP character created by Nagono, with calm and frustrated typing, coffee, burger, resting, a static jump fallback, and 16-direction look animations.",
+  "spriteVersionNumber": 2,
+  "spritesheetPath": "spritesheet.webp"
+}
