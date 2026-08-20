@@ -18,9 +18,23 @@ if (!globalThis.__dshConsoleHideShim) {
   const cp = require('node:child_process')
   const path = require('node:path')
   const LAUNCHER = process.env.DSH_HIDE_LAUNCHER || path.join(__dirname, 'hidden-console-launcher.exe')
+  // Single argv token: NODE_OPTIONS cannot carry a path with spaces (the
+  // installer directory is "...\DeepSeek Harness\..."), but argv tokens are
+  // never split, so this form works everywhere.
+  const SHIM_ARG = '--require=' + __filename
 
   const isOptions = (value) =>
     value !== null && typeof value === 'object' && !Array.isArray(value) && !Buffer.isBuffer(value)
+
+  /** Node/Electron-as-node children: inject the shim into their argv. */
+  const isNodeChild = (cmd) => {
+    const base = String(cmd).toLowerCase().split(/[\\/]/).pop() || ''
+    return base === 'node' || base === 'node.exe' ||
+      base === 'electron' || base === 'electron.exe'
+  }
+
+  const alreadyShimmed = (args) =>
+    Array.isArray(args) && args.some((arg) => String(arg).indexOf('console-hide-shim') !== -1)
 
   /** The ACL sandbox runner must share a hidden host console. */
   const isSandboxRunnerSpawn = (cmd, args) => {
@@ -59,15 +73,33 @@ if (!globalThis.__dshConsoleHideShim) {
           command = LAUNCHER
         }
       }
+      if (name === 'spawn' || name === 'spawnSync' || name === 'execFile' || name === 'execFileSync') {
+        const argv = Array.isArray(args[1]) ? args[1] : null
+        if (argv !== null && isNodeChild(command) && !alreadyShimmed(argv)) {
+          args[1] = [SHIM_ARG, ...argv]
+        }
+      }
       for (let index = args.length - 1; index >= 0; index--) {
         if (isOptions(args[index])) {
-          args[index].windowsHide = true
+          const opts = args[index]
+          opts.windowsHide = true
+          if (name === 'fork') {
+            const execArgv = Array.isArray(opts.execArgv) ? opts.execArgv.slice() : (process.execArgv || []).slice()
+            if (!alreadyShimmed(execArgv)) execArgv.push(SHIM_ARG)
+            opts.execArgv = execArgv
+          }
           return original.apply(this, args)
         }
       }
       const last = args[args.length - 1]
-      if (typeof last === 'function') args.splice(args.length - 1, 0, { windowsHide: true })
-      else args.push({ windowsHide: true })
+      const opts = { windowsHide: true }
+      if (name === 'fork') {
+        const execArgv = (process.execArgv || []).slice()
+        if (!alreadyShimmed(execArgv)) execArgv.push(SHIM_ARG)
+        opts.execArgv = execArgv
+      }
+      if (typeof last === 'function') args.splice(args.length - 1, 0, opts)
+      else args.push(opts)
       return original.apply(this, args)
     }
   }

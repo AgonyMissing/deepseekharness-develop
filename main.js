@@ -3022,6 +3022,10 @@ function startServer() {
     const shimPath = path.join(__dirname, 'resources', 'console-hide-shim.cjs')
     const launcherPath = path.join(__dirname, 'resources', 'hidden-console-launcher.exe')
     const child = spawn(process.execPath, [
+      // Loaded as separate argv tokens (not NODE_OPTIONS): the install path
+      // may contain spaces ("...\DeepSeek Harness\..."), and NODE_OPTIONS
+      // splits on spaces, which truncated --require and crashed the server.
+      '--require', shimPath,
       '--expose-internals',
       SERVER_ENTRY,
       'web',
@@ -3042,7 +3046,6 @@ function startServer() {
         // routed through the hidden-console launcher so no black window can
         // flash even from nested spawns.
         DSH_HIDE_LAUNCHER: launcherPath,
-        NODE_OPTIONS: [process.env.NODE_OPTIONS, `--require=${shimPath}`].filter(Boolean).join(' '),
       },
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
