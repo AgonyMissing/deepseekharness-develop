@@ -254,8 +254,6 @@ const WEBUI_FAMILY_ROWS = [
   ['web-ui-chat-recovery', '@linxin666/dsh-chat-recovery'],
   ['web-ui-liangshen', '@linxin666/dsh-liangshen'],
   ['web-ui-skill-explorer', '@linxin666/dsh-client-ui-skill-explorer'],
-  ['web-ui-desktop-launcher', '@linxin666/dsh-desktop-launcher'],
-  ['web-ui-skin-center', '@linxin666/dsh-client-ui-skin-center'],
   ['web-ui-better-sidebar', 'dsh-better-sidebar'],
 ]
 
@@ -783,6 +781,19 @@ body[data-dsh-sidebar-dragging] #root div[style*="grid-template-columns"] > div:
   /* Same layer as the session header/log, so settings dialogs (rendered in
      the sidebar stack above it) are never blocked by these two buttons. */
   z-index: 8 !important;
+}
+/* Hide the 0.2.4 bottom-left quick actions (check-for-updates + mobile
+   remote control) — the user summons those from elsewhere or not at all. */
+[class*="fThDlq_entryRow"],
+button[aria-label="检查更新"],
+button[aria-label="移动端远程控制"] {
+  display: none !important;
+}
+/* 0.2.4 pet settings card: the header row is width:100% + padding without
+   border-box, so the unsaved badge gets pushed outside the card edge. */
+[class*="kKk9aW_headerStatic"],
+[class*="kKk9aW_header"] {
+  box-sizing: border-box !important;
 }
 /* Keep the header's right-aligned utilities (Session log) clear of the two
    toggle buttons whether the panel is open or collapsed. */
@@ -2002,19 +2013,25 @@ const MCP_MANAGER_CSS = `
   align-items: center;
   gap: 8px;
   width: 100%;
-  min-height: 38px;
-  padding: 0 10px;
+  min-height: auto;
+  padding: 9px 16px 9px 12px;
   border: 0;
-  border-radius: 9px;
+  border-radius: 12px;
   background: transparent;
   color: var(--dsw-alias-label-primary, #15171b);
-  font: inherit;
+  font-size: 14px;
+  line-height: 22px;
   cursor: pointer;
   text-align: left;
   transition: background 140ms ease;
 }
 .dse-mcp-nav:hover { background: rgba(120, 125, 140, 0.09); }
-.dse-mcp-nav.is-active { background: rgba(77, 112, 255, 0.1); color: #4d70ff; }
+.dse-mcp-nav.is-active,
+.dse-mcp-nav.VOzbGW_active {
+  background: var(--dsw-specific-sidebar-nav-item-active, #dee9f8);
+  color: var(--dsw-alias-label-primary, #15171b);
+  font-weight: 600;
+}
 .dse-mcp-nav svg { width: 16px; height: 16px; flex: none; }
 .dse-skill-search input {
   max-width: 320px;
@@ -2042,6 +2059,9 @@ const MCP_MANAGER_CSS = `
   border: 0;
   border-radius: 0;
   box-shadow: none;
+  background: transparent;
+  padding: 0;
+  animation: none;
 }
 .dse-mcp-overlay {
   position: fixed;
@@ -2285,8 +2305,12 @@ const MCP_MANAGER_JS = `(() => {
       navList.__dseNavBound = true
       navList.addEventListener('click', function (ev) {
         var cell = ev.target && ev.target.closest ? ev.target.closest('button') : null
-        if (cell !== null && cell.className.indexOf('dse-mcp-nav') === -1 && overlay !== null) {
-          closeOverlay()
+        if (cell !== null && cell.className.indexOf('dse-mcp-nav') === -1) {
+          qsa('.dse-mcp-nav', navList).forEach(function (b) {
+            b.classList.remove('is-active')
+            b.classList.remove('VOzbGW_active')
+          })
+          if (overlay !== null) closeOverlay()
         }
       }, true)
     }
@@ -2302,8 +2326,13 @@ const MCP_MANAGER_JS = `(() => {
     if (mcpCell !== null && !mcpCell.__dseBound) {
       mcpCell.__dseBound = true
       mcpCell.addEventListener('click', function () {
-        qsa('.dse-mcp-nav', navList).forEach(function (b) { b.classList.remove('is-active') })
+        qsa('.dse-mcp-nav', navList).forEach(function (b) {
+          b.classList.remove('is-active')
+          b.classList.remove('VOzbGW_active')
+        })
+        qsa('[class*="VOzbGW_navCell"]', navList).forEach(function (c) { c.classList.remove('VOzbGW_active') })
         mcpCell.classList.add('is-active')
+        mcpCell.classList.add('VOzbGW_active')
         openOverlay()
       })
     }
@@ -2319,8 +2348,13 @@ const MCP_MANAGER_JS = `(() => {
     if (skillCell !== null && !skillCell.__dseBound) {
       skillCell.__dseBound = true
       skillCell.addEventListener('click', function () {
-        qsa('.dse-mcp-nav', navList).forEach(function (b) { b.classList.remove('is-active') })
+        qsa('.dse-mcp-nav', navList).forEach(function (b) {
+          b.classList.remove('is-active')
+          b.classList.remove('VOzbGW_active')
+        })
+        qsa('[class*="VOzbGW_navCell"]', navList).forEach(function (c) { c.classList.remove('VOzbGW_active') })
         skillCell.classList.add('is-active')
+        skillCell.classList.add('VOzbGW_active')
         openSkillsOverlay()
       })
     }
@@ -2549,8 +2583,6 @@ const MCP_MANAGER_JS = `(() => {
       inlineHost = null
       hiddenSection = null
     }
-    var navList = findSettingsNavList()
-    if (navList) qsa('.dse-mcp-nav', navList).forEach(function (b) { b.classList.remove('is-active') })
   }
 
   function api(path, options) {
