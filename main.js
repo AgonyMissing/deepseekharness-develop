@@ -242,14 +242,20 @@ function copyDirSync(from, to) {
 const WEBUI_FAMILY_ROWS = [
   ['web-ui-compat', '@linxin666/dsh-web-ui-all'],
   ['web-ui-settings', '@linxin666/dsh-client-ui-web-ui-settings'],
+  ['web-ui-plugin-manager', '@linxin666/dsh-client-ui-plugin-manager'],
   ['web-ui-community-plugins', '@linxin666/dsh-client-ui-community-plugins'],
   ['web-ui-dsh-aionui-panel', '@linxin666/dsh-client-ui-aionui-panel'],
   ['web-ui-task-board', '@linxin666/dsh-client-ui-task-board'],
   ['web-ui-git-graph', '@linxin666/dsh-client-ui-git-graph'],
+  ['web-ui-pet', '@linxin666/dsh-pet'],
+  ['web-ui-remote-web-ui', '@linxin666/dsh-remote-web-ui'],
   ['web-ui-ssh', '@linxin666/dsh-ssh'],
   ['web-ui-describe-image', '@linxin666/dsh-tool-describe-image'],
+  ['web-ui-chat-recovery', '@linxin666/dsh-chat-recovery'],
   ['web-ui-liangshen', '@linxin666/dsh-liangshen'],
   ['web-ui-skill-explorer', '@linxin666/dsh-client-ui-skill-explorer'],
+  ['web-ui-desktop-launcher', '@linxin666/dsh-desktop-launcher'],
+  ['web-ui-skin-center', '@linxin666/dsh-client-ui-skin-center'],
   ['web-ui-better-sidebar', 'dsh-better-sidebar'],
 ]
 
@@ -337,23 +343,9 @@ function ensureAquaPlugin() {
 }
 
 function ensureWebUiFamily() {
-  // Migration first: drop the removed pet plugin from already-initialized
-  // profiles (the fresh-machine crash "no valid pet manifests found" came
-  // from the pet row loading with no bundled pet assets). Kept independent
-  // of the module copy below so a copy failure can never block the fix.
-  try {
-    const aggPatch = path.join(WEBUI_PROFILE_NM, '@linxin666', 'dsh-web-ui-all', 'cordis.patch.yml')
-    if (fs.existsSync(aggPatch)) {
-      let agg = fs.readFileSync(aggPatch, 'utf8')
-      const nextAgg = agg.split('\n')
-        .filter(line => !/^\s*- id: web-ui-pet\s*$/.test(line)
-          && !/name:\s*['"]?@linxin666\/dsh-pet/.test(line)
-          && line.trim() !== '# from ../dsh-pet')
-        .join('\n')
-        .replace(/\n{3,}/g, '\n\n')
-      if (nextAgg !== agg) fs.writeFileSync(aggPatch, nextAgg, 'utf8')
-    }
-  } catch { /* aggregate patch is optional */ }
+  // The web-ui family rows are rewritten on every start so already-initialized
+  // profiles pick up added rows (e.g. the 0.2.4 plugin-manager / chat-recovery
+  // / desktop-launcher / skin-center rows) without manual patching.
   try {
     const webPatch = path.join(DSH_HOME, 'profiles', 'web', 'cordis.patch.yml')
     let existing = ''
