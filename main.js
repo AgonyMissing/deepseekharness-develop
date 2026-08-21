@@ -283,6 +283,7 @@ const WEBUI_FAMILY_ROWS = [
  */
 function syncBundledWebUiModules() {
   const bundledRoot = path.join(WEBUI_BUNDLED_ROOT, 'node_modules')
+  const kernelRoot = path.join(__dirname, 'resources', 'dsh', 'node_modules')
   if (!fs.existsSync(bundledRoot)) return
   fs.mkdirSync(WEBUI_PROFILE_NM, { recursive: true })
   for (const scope of fs.readdirSync(bundledRoot)) {
@@ -300,6 +301,12 @@ function syncBundledWebUiModules() {
     for (const relative of entries) {
       const source = path.join(bundledRoot, ...relative.split('/'))
       if (!fs.existsSync(path.join(source, 'package.json'))) continue
+      // Skip packages the dsh kernel ships in its own module tree: dsh heals
+      // those as junction links in the profile fallback, and a real directory
+      // here would crash boot on a fresh install ("exists and is not a
+      // symlink"). Only web-ui-family packages missing from the kernel are
+      // copied as real directories.
+      if (fs.existsSync(path.join(kernelRoot, ...relative.split('/')))) continue
       const target = path.join(WEBUI_PROFILE_NM, ...relative.split('/'))
       if (fs.existsSync(path.join(target, 'package.json'))) continue
       fs.rmSync(target, { recursive: true, force: true })
@@ -718,6 +725,19 @@ body {
   --dsw-font-markdown-h2: 700 calc(var(--dse-chat-font-size, 16px) * 1.375)/1.4 var(--dse-chat-font-family, var(--dsw-font-family)) !important;
   --dsw-font-markdown-h3: 600 calc(var(--dse-chat-font-size, 16px) * 1.25)/1.45 var(--dse-chat-font-family, var(--dsw-font-family)) !important;
 }
+/* User message bubbles are plain text (not markdown), so they need their own
+   rule to follow the 会话字号/字体 slider. */
+.gdEzaW_bubble,
+.gdEzaW_bubble [class*="_text"] {
+  font-size: var(--dse-chat-font-size, 16px) !important;
+  font-family: var(--dse-chat-font-family, var(--dsw-font-family)) !important;
+}
+/* 会话宽度：覆盖内核的宽度变量（消息列用 --dsh-chat-content-width，
+   输入框用 --dsh-composer-card-max-width），不动布局类，避免破坏居中。 */
+.wSkVaW_root {
+  --dsh-chat-content-width: var(--dse-chat-width, 748px) !important;
+  --dsh-composer-card-max-width: var(--dse-composer-width, 780px) !important;
+}
 .dse-chat-font-box {
   width: 100%;
   margin: 2px 0 8px;
@@ -796,7 +816,7 @@ body {
 }
 .dse-chat-font-label {
   flex: none;
-  width: 34px;
+  width: 64px;
   font-size: 12px;
   color: var(--dsw-alias-label-secondary, #686c75);
 }
@@ -3435,17 +3455,29 @@ async function injectBackgroundWhenReady(win) {
         function applyChatFont() {
           var size = localStorage.getItem('dsh.desktop.chatFontSize') || '16'
           var fam = localStorage.getItem('dsh.desktop.chatFontFamily') || ''
+          var width = localStorage.getItem('dsh.desktop.chatWidth') || '748'
+          var composerWidth = localStorage.getItem('dsh.desktop.composerWidth') || '780'
           var root = document.documentElement
           root.style.setProperty('--dse-chat-font-size', size + 'px')
           root.style.setProperty('--dse-chat-font-family', fam || 'var(--dsw-font-family)')
+          root.style.setProperty('--dse-chat-width', width + 'px')
+          root.style.setProperty('--dse-composer-width', composerWidth + 'px')
           var box = document.querySelector('.dse-chat-font-box')
           if (box) {
             var slider = box.querySelector('.dse-chat-font-size')
             var val = box.querySelector('.dse-chat-font-value')
             var sel = box.querySelector('.dse-chat-font-family')
+            var wSlider = box.querySelector('.dse-chat-width')
+            var wVal = box.querySelector('.dse-chat-width-value')
+            var cSlider = box.querySelector('.dse-composer-width')
+            var cVal = box.querySelector('.dse-composer-width-value')
             if (slider) slider.value = size
             if (val) val.textContent = size + 'px'
             if (sel) sel.value = fam
+            if (wSlider) wSlider.value = width
+            if (wVal) wVal.textContent = width + 'px'
+            if (cSlider) cSlider.value = composerWidth
+            if (cVal) cVal.textContent = composerWidth + 'px'
           }
         }
         function mountChatFontBox() {
@@ -3458,6 +3490,8 @@ async function injectBackgroundWhenReady(win) {
           box.innerHTML =
             '<div class="dse-chat-font-title">会话字体</div>' +
             '<div class="dse-chat-font-row"><span class="dse-chat-font-label">字号</span><input type="range" class="dse-chat-font-size" min="12" max="24" step="1"><span class="dse-chat-font-value">16px</span></div>' +
+            '<div class="dse-chat-font-row"><span class="dse-chat-font-label">会话宽度</span><input type="range" class="dse-chat-width" min="640" max="1200" step="20"><span class="dse-chat-font-value dse-chat-width-value">748px</span></div>' +
+            '<div class="dse-chat-font-row"><span class="dse-chat-font-label">输入框宽度</span><input type="range" class="dse-composer-width" min="640" max="1200" step="20"><span class="dse-chat-font-value dse-composer-width-value">780px</span></div>' +
             '<div class="dse-chat-font-row"><span class="dse-chat-font-label">字体</span><select class="dse-chat-font-family">' +
             FONT_OPTIONS.map(function (o) { return '<option value="' + o.value.replace(/"/g, '&quot;') + '">' + o.label + '</option>' }).join('') +
             '</select></div>'
@@ -3472,6 +3506,20 @@ async function injectBackgroundWhenReady(win) {
           })
           if (sel) sel.addEventListener('change', function () {
             try { localStorage.setItem('dsh.desktop.chatFontFamily', sel.value) } catch (e) {}
+            applyChatFont()
+          })
+          var wSlider = box.querySelector('.dse-chat-width')
+          var wVal = box.querySelector('.dse-chat-width-value')
+          if (wSlider) wSlider.addEventListener('input', function () {
+            try { localStorage.setItem('dsh.desktop.chatWidth', wSlider.value) } catch (e) {}
+            if (wVal) wVal.textContent = wSlider.value + 'px'
+            applyChatFont()
+          })
+          var cSlider = box.querySelector('.dse-composer-width')
+          var cVal = box.querySelector('.dse-composer-width-value')
+          if (cSlider) cSlider.addEventListener('input', function () {
+            try { localStorage.setItem('dsh.desktop.composerWidth', cSlider.value) } catch (e) {}
+            if (cVal) cVal.textContent = cSlider.value + 'px'
             applyChatFont()
           })
           applyChatFont()
