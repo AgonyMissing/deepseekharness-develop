@@ -858,7 +858,8 @@ body[data-dsh-sidebar-dragging] #root div[style*="grid-template-columns"] > div:
 /* Hide the bottom-left quick actions; the mobile remote control entry now
    lives inside 设置 (see .dse-remote-card), so no stray buttons remain. */
 button[aria-label="检查更新"],
-button[aria-label="移动端远程控制"] {
+button[aria-label="移动端远程控制"],
+button[aria-label="远程访问"] {
   display: none !important;
 }
 /* 0.2.4 pet settings card: the header row is width:100% + padding without
@@ -3490,7 +3491,8 @@ async function injectBackgroundWhenReady(win) {
           var ref = dialog.querySelector('.dse-chat-font-box') || anchor
           ref.insertAdjacentElement('afterend', card)
           card.querySelector('.dse-remote-open').addEventListener('click', function () {
-            var trigger = document.querySelector('button[aria-label="移动端远程控制"]')
+            var trigger = document.querySelector('button[aria-label="移动端远程控制"]') ||
+              document.querySelector('button[aria-label="远程访问"]')
             if (trigger) trigger.click()
           })
         }
