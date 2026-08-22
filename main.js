@@ -729,6 +729,20 @@ html[data-dsh-aqua] [role='tooltip'] {
   backdrop-filter: none !important;
   border-radius: 8px !important;
 }
+/* 桌宠对话气泡：恢复插件自带的深色/蓝色背景和浅色文字，避免被玻璃皮肤的
+   [class*=bubble] 规则改成半透明白（浅色模式下文字会看不见）。 */
+html[data-dsh-aqua] [class*="kz2Bea_bubble"] {
+  color: #f4f7ff !important;
+}
+html[data-dsh-aqua] [class*="kz2Bea_bubbleStatus"] {
+  background: linear-gradient(160deg, #131c36e6, #070b1af0) !important;
+}
+html[data-dsh-aqua] [class*="kz2Bea_bubblePet"] {
+  background: #4d6bfef2 !important;
+}
+html[data-dsh-aqua] [class*="kz2Bea_bubbleFeed"] {
+  background: #0369a1f2 !important;
+}
 /* 兼容模式与云母模式保持一致的顶部对齐：去掉 better-sidebar 为标题栏预留的
    40px 内边距，侧边栏内容（展开侧边栏 / sessionlog）不再整体下移。 */
 body[data-dsh-title-bar-compat] [class*="nArs4W_panel"] {
@@ -740,6 +754,12 @@ body[data-dsh-title-bar-compat] .nArs4W_toggleCluster {
 /* 云母模式：展开侧边栏/展开底部两个按钮略微下移（避免贴顶）。 */
 html[data-dsh-float] .nArs4W_toggleCluster {
   top: 52px !important;
+}
+/* 设置弹窗在侧边栏栈内渲染：云母模式下侧边栏上下文 z-index 只有 9，
+   把弹窗的 z-index 1000 封死在里面，导致设置显示在 SSH/任务看板
+   （z-index 60）下方。把侧边栏上下文提到 70，设置弹窗就能盖住它们。 */
+html[data-dsh-float] [class*="sidebarCol"] {
+  z-index: 70 !important;
 }
 /* 兼容模式：侧边栏与底部面板保持毛玻璃（外层 + 内层表面都强制半透明），
    并确保壁纸层在最底层可见，避免出现纯白背景板。 */
@@ -986,6 +1006,28 @@ button[aria-label="远程访问"] {
 }
 [class~="cBrkua_badge"] {
   border-radius: 999px !important;
+}
+/* 技能中心“可调用：模型/用户”徽章：内核主题把成功色 token 设成
+   绿底绿字，文字看不见。恢复插件本意的浅绿底 + 深绿字。 */
+[class~="cBrkua_badgeInvokable"] {
+  background: #ecfdf5 !important;
+  color: #0f7a50 !important;
+  border-color: #c9f0dd !important;
+}
+/* 技能中心弹窗：去掉一闪而过的生硬弹出，换成优雅的淡入 + 轻微上浮。 */
+[class*="cBrkua_overlay"] {
+  animation: dseSkillFade 0.18s ease-out !important;
+}
+[class*="cBrkua_card"] {
+  animation: dseSkillPop 0.26s cubic-bezier(0.22, 1, 0.36, 1) !important;
+}
+@keyframes dseSkillFade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes dseSkillPop {
+  from { opacity: 0; transform: translateY(12px) scale(0.985); }
+  to { opacity: 1; transform: none; }
 }
 /* Dark-mode adjustments for injected glass surfaces. */
 body[data-ds-dark-theme] [data-dse-slider] {
