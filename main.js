@@ -308,7 +308,21 @@ function syncBundledWebUiModules() {
       // copied as real directories.
       if (fs.existsSync(path.join(kernelRoot, ...relative.split('/')))) continue
       const target = path.join(WEBUI_PROFILE_NM, ...relative.split('/'))
-      if (fs.existsSync(path.join(target, 'package.json'))) continue
+      // Refresh the profile copy when the bundled version differs, so family
+      // upgrades propagate on the next start (fresh machines copy everything).
+      let bundledVersion = null
+      try {
+        bundledVersion = JSON.parse(fs.readFileSync(path.join(source, 'package.json'), 'utf8')).version
+      } catch {}
+      if (bundledVersion !== null) {
+        let installedVersion = null
+        try {
+          installedVersion = JSON.parse(fs.readFileSync(path.join(target, 'package.json'), 'utf8')).version
+        } catch {}
+        if (installedVersion === bundledVersion) continue
+      } else {
+        if (fs.existsSync(path.join(target, 'package.json'))) continue
+      }
       fs.rmSync(target, { recursive: true, force: true })
       fs.mkdirSync(path.dirname(target), { recursive: true })
       copyDirSync(source, target)
