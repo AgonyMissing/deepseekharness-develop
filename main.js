@@ -729,6 +729,33 @@ html[data-dsh-aqua] [role='tooltip'] {
   backdrop-filter: none !important;
   border-radius: 8px !important;
 }
+/* 兼容模式与云母模式保持一致的顶部对齐：去掉 better-sidebar 为标题栏预留的
+   40px 内边距，侧边栏内容（展开侧边栏 / sessionlog）不再整体下移。 */
+body[data-dsh-title-bar-compat] [class*="nArs4W_panel"] {
+  padding-top: 0 !important;
+}
+body[data-dsh-title-bar-compat] .nArs4W_toggleCluster {
+  top: calc(var(--dsh-title-bar-strip, 40px) + 3px) !important;
+}
+/* 云母模式：展开侧边栏/展开底部两个按钮略微下移（避免贴顶）。 */
+html[data-dsh-float] .nArs4W_toggleCluster {
+  top: 52px !important;
+}
+/* 兼容模式：侧边栏与底部面板保持毛玻璃（外层 + 内层表面都强制半透明），
+   并确保壁纸层在最底层可见，避免出现纯白背景板。 */
+html[data-dsh-compat] [class*="nArs4W_panel"],
+html[data-dsh-compat] [class*="nArs4W_bottomPanel"],
+html[data-dsh-compat] [class*="nArs4W_panelBody"],
+html[data-dsh-compat] [class*="nArs4W_tabBar"],
+html[data-dsh-compat] [class*="nArs4W_pane"] {
+  background: var(--dsw-alias-bg-base, rgba(255, 255, 255, 0.42)) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+  backdrop-filter: blur(12px) !important;
+}
+html[data-dsh-compat] [data-dsh-aqua-wallpaper-layer] {
+  display: block !important;
+  z-index: -1 !important;
+}
 /* Chat font controls: the injected 会话字体/字号 box writes these variables,
    and the markdown body token picks them up (code blocks keep their own
    monospace tokens). Must override on body: the stock skin redefines the
@@ -2854,6 +2881,67 @@ const MCP_MANAGER_JS = `(() => {
  * the same injection seam as the background artwork, so the stock UI stays
  * untouched and the slider survives app updates that re-render the page.
  */
+const TOOLTIP_FIX_JS = `(() => {
+  if (window.__dseTooltipFix) return
+  window.__dseTooltipFix = true
+  // Hide the React-owned originals via a stylesheet rule (!important beats
+  // React's inline style rewrites, so they never flash at the broken spot).
+  const style = document.createElement('style')
+  style.textContent = '[class*="bubble_owhem"]:not([data-dse-tip-clone]) { display: none !important; }'
+  document.head.appendChild(style)
+  const clones = new Map()
+  const position = (tip, clone) => {
+    const anchor = tip.parentElement
+    if (!anchor) return
+    const hovered = anchor.querySelector(':hover') || anchor.querySelector('button:focus') || anchor
+    const ar = hovered.getBoundingClientRect()
+    const h = clone.offsetHeight || 26
+    const w = clone.offsetWidth || 40
+    const top = ar.top + h > window.innerHeight - 8 ? window.innerHeight - h - 8 : ar.top
+    clone.style.position = 'fixed'
+    // Prefer the right side, flip to the left when there is no room.
+    let left = ar.right + 8
+    if (left + w > window.innerWidth - 8) left = ar.left - w - 8
+    clone.style.left = Math.round(left) + 'px'
+    clone.style.top = Math.round(top) + 'px'
+    clone.style.zIndex = '1000'
+    clone.style.transform = 'none'
+    clone.style.margin = '0'
+    clone.style.pointerEvents = 'none'
+  }
+  const sync = (tip) => {
+    if (tip.parentElement === document.body) return
+    let clone = clones.get(tip)
+    if (!clone || !clone.isConnected) {
+      clone = tip.cloneNode(true)
+      clone.setAttribute('data-dse-tip-clone', '')
+      clones.set(tip, clone)
+      document.body.appendChild(clone)
+    }
+    // keep the visible text in sync (e.g. 复制 -> 复制成功)
+    if (clone.innerHTML !== tip.innerHTML) {
+      clone.innerHTML = tip.innerHTML
+    }
+    position(tip, clone)
+  }
+  const scan = () => {
+    document.querySelectorAll('[role="tooltip"], [class*="bubble_owhem"]').forEach(sync)
+    for (const [tip, clone] of clones) {
+      if (!tip.isConnected) {
+        clone.remove()
+        clones.delete(tip)
+      }
+    }
+  }
+  scan()
+  // Interval (not a MutationObserver): observer-driven style writes would
+  // feed back into the observer and freeze the page during big re-renders.
+  setInterval(scan, 150)
+  const reposition = () => { for (const [tip, clone] of clones) position(tip, clone) }
+  window.addEventListener('scroll', reposition, true)
+  window.addEventListener('resize', reposition)
+})()`
+
 async function injectEffortSlider(win, wait = false) {
   try {
     await win.webContents.executeJavaScript(`new Promise((resolve) => {
@@ -2870,6 +2958,7 @@ async function injectEffortSlider(win, wait = false) {
     await win.webContents.executeJavaScript(EFFORT_SLIDER_JS)
     await win.webContents.insertCSS(MCP_MANAGER_CSS)
     await win.webContents.executeJavaScript(MCP_MANAGER_JS)
+    await win.webContents.executeJavaScript(TOOLTIP_FIX_JS).catch(() => {})
     if (wait) {
       await win.webContents.executeJavaScript(`new Promise((resolve) => {
         const check = () => {
