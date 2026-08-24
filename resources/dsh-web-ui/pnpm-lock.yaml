@@ -6,50 +6,64 @@ settings:
 
 dependencies:
   '@linxin666/dsh-chat-recovery':
-    specifier: 0.2.7
-    version: 0.2.7
+    specifier: 0.3.2
+    version: 0.3.2
   '@linxin666/dsh-client-ui-aionui-panel':
-    specifier: 0.2.7
-    version: 0.2.7
+    specifier: 0.3.2
+    version: 0.3.2
   '@linxin666/dsh-client-ui-community-plugins':
-    specifier: 0.2.7
-    version: 0.2.7
+    specifier: 0.3.2
+    version: 0.3.2
   '@linxin666/dsh-client-ui-git-graph':
-    specifier: 0.2.7
-    version: 0.2.7
+    specifier: 0.3.2
+    version: 0.3.2
+  '@linxin666/dsh-client-ui-market':
+    specifier: 0.3.2
+    version: 0.3.2
   '@linxin666/dsh-client-ui-plugin-manager':
-    specifier: 0.2.7
-    version: 0.2.7
+    specifier: 0.3.2
+    version: 0.3.2
   '@linxin666/dsh-client-ui-skill-explorer':
-    specifier: 0.2.7
-    version: 0.2.7
+    specifier: 0.3.2
+    version: 0.3.2
   '@linxin666/dsh-client-ui-task-board':
-    specifier: 0.2.7
-    version: 0.2.7
+    specifier: 0.3.2
+    version: 0.3.2
   '@linxin666/dsh-client-ui-web-ui-settings':
-    specifier: 0.2.7
-    version: 0.2.7
+    specifier: 0.3.2
+    version: 0.3.2
   '@linxin666/dsh-desktop-launcher':
-    specifier: 0.2.7
-    version: 0.2.7
+    specifier: 0.3.2
+    version: 0.3.2
+  '@linxin666/dsh-doctor':
+    specifier: 0.3.2
+    version: 0.3.2
   '@linxin666/dsh-liangshen':
-    specifier: 0.2.7
-    version: 0.2.7
+    specifier: 0.3.2
+    version: 0.3.2
   '@linxin666/dsh-remote-web-ui':
-    specifier: 0.2.7
-    version: 0.2.7
+    specifier: 0.3.2
+    version: 0.3.2
   '@linxin666/dsh-ssh':
-    specifier: 0.2.7
-    version: 0.2.7
+    specifier: 0.3.2
+    version: 0.3.2
   '@linxin666/dsh-tool-describe-image':
-    specifier: 0.2.7
-    version: 0.2.7
+    specifier: 0.3.2
+    version: 0.3.2
   '@linxin666/dsh-web-ui-all':
-    specifier: 0.2.7
-    version: 0.2.7
+    specifier: 0.3.2
+    version: 0.3.2
+  '@mlgbnb/dsh-archive-manager':
+    specifier: 1.0.7
+    version: 1.0.7
   dsh-better-sidebar:
-    specifier: 0.14.0
-    version: 0.14.0
+    specifier: 0.15.2
+    version: 0.15.2
+
+devDependencies:
+  pnpm:
+    specifier: 8.15.9
+    version: 8.15.9
 
 packages:
 
@@ -405,51 +419,59 @@ packages:
       '@lezer/lr': 1.4.10
     dev: false
 
-  /@linxin666/dsh-chat-recovery@0.2.7:
-    resolution: {integrity: sha512-Q5y13KO+qZauSg4h1xCHyPj/Ba4usRUGMp3giH4dfdFf6oiGdyLAJ3BDfY0nxpZfx+4wWmxAuj/JxE3OE252Og==}
+  /@linxin666/dsh-chat-recovery@0.3.2:
+    resolution: {integrity: sha512-ViDUkosK6UGP9J3s7M4mlzLDzPfIkauXe8ycLSpFNB6kTs5r1xfsi+410ea2+ZvS+yYhQT2fvnwk9wJrJoRPMg==}
     engines: {node: ^22.19.0 || >=24.0.0}
     peerDependencies:
       react: ^18.2.0
       react-dom: ^18.2.0
     dev: false
 
-  /@linxin666/dsh-client-ui-aionui-panel@0.2.7:
-    resolution: {integrity: sha512-ehZfRoyHol0BIlBootOPGR4yMclQpD0wNb8B55uo4TBx+iEAnxshZMn21LiywqVU883uzjiaBhN4cQFMgVNLig==}
+  /@linxin666/dsh-client-ui-aionui-panel@0.3.2:
+    resolution: {integrity: sha512-Xoj8QW2MWjXWU0DN+81Koo6UOKbtx0DXIXYtGjuxQmCw0OmiQ1q7fx64yKbHB6YRGTCQ0XaNp7fXMzCduvW5Ew==}
     peerDependencies:
       react: ^18.2.0
     dev: false
 
-  /@linxin666/dsh-client-ui-community-plugins@0.2.7:
-    resolution: {integrity: sha512-z6b/EMa6M/VhNlYGrrsgC1IlX7k1NEAmcNQFwPKjOL/zObwazin0IWhFHpr0FeYKhpt1kbQoVjp2weWcWVmmUg==}
+  /@linxin666/dsh-client-ui-community-plugins@0.3.2:
+    resolution: {integrity: sha512-ZsXSwDCDajzmPgScQr3hwHcMQXH0Ns4vgEAi8LMDETIP5gDiGLQq0iVE15dTW5a/f9nWEohr3cg9HjfCrgq9QQ==}
     peerDependencies:
       react: ^18.2.0
     dependencies:
       schemastery: 3.18.0
     dev: false
 
-  /@linxin666/dsh-client-ui-git-graph@0.2.7:
-    resolution: {integrity: sha512-gnFeuTgSoovkvRLOHBRH+1Ar/CioiO+wFork3rhVeZBKcg10laYo+Wv5hOCxzSz5noYehp4rJPawS4axAFYupA==}
+  /@linxin666/dsh-client-ui-git-graph@0.3.2:
+    resolution: {integrity: sha512-iLYET5oKt7BntzwoooRmg3mK5EHueLOvBcDXC09hptutRrVC5kxJr30052rCvbPxyG+yYR5mTpxZR8zqMppeNA==}
     engines: {node: ^22.19.0 || >=24.0.0}
     peerDependencies:
       react: ^18.2.0
     dev: false
 
-  /@linxin666/dsh-client-ui-plugin-manager@0.2.7:
-    resolution: {integrity: sha512-WTf+ndf8hFE7CMoVBdO1PW7crozXvIdtxzg4cPX2GAlZPNWZK0BTXe8BZdDsARmO9wN3+FJJB3raXsjc8sp0KQ==}
+  /@linxin666/dsh-client-ui-market@0.3.2:
+    resolution: {integrity: sha512-7zs2qFtEinjHq+9EDrzYpbIOhqJRdlGZrZmbR7rnYuywWqZ5C6ZT8BcKnHKsXxypkZwHz5gp9r/n2UkCjg+i0g==}
+    peerDependencies:
+      react: ^18.2.0
+    dependencies:
+      schemastery: 3.18.0
+    dev: false
+
+  /@linxin666/dsh-client-ui-plugin-manager@0.3.2:
+    resolution: {integrity: sha512-WEdP+F8xBI212mO+BIMN3XqPFiaxAo4EHG0dT1Kps2Rd42zFEhbjD8LktbSKf5cF48+ccFuiX4HVSHd7Lb/RPg==}
     peerDependencies:
       react: ^18.2.0
     dependencies:
       yaml: 2.9.0
     dev: false
 
-  /@linxin666/dsh-client-ui-skill-explorer@0.2.7:
-    resolution: {integrity: sha512-Cbj7k4PdX4O82kf6mZNYMKCyoQ5sEyopVVelrAZ71T9lLIBNu/YAyeMeackq/TgkRk7F3bEdUDiLwdJrdZHXeg==}
+  /@linxin666/dsh-client-ui-skill-explorer@0.3.2:
+    resolution: {integrity: sha512-nWEzeDyWkJyj5xoW13OPcoLi1kJSWX3/aAkn4WdoOdVeb5mqZvrISsAkcozqwwcs7GSP8zuxKcUk/GqayFopYg==}
     peerDependencies:
       react: ^18.2.0
     dev: false
 
-  /@linxin666/dsh-client-ui-skin-center@0.2.7:
-    resolution: {integrity: sha512-QyY1s3gdlXagC5mYHTgiBUj2J0u6z1wjaPn/TQXB6y+2+TBhrMPFHmZpmwq2RE8dy0cc4E2MlHX10IwX8lPWfw==}
+  /@linxin666/dsh-client-ui-skin-center@0.3.2:
+    resolution: {integrity: sha512-FjkvfjVgjpvwlLZ7YZVCizc62MrjGYgbhQcxK9n9fgXou3ILPe9hc9SLXssfgeUJxMxzx7sPVe3eGJpAKnpuqw==}
     peerDependencies:
       react: ^18.2.0
     dependencies:
@@ -458,26 +480,26 @@ packages:
       schemastery: 3.18.0
     dev: false
 
-  /@linxin666/dsh-client-ui-task-board@0.2.7:
-    resolution: {integrity: sha512-9Gnd12bcCtUTf4UVI0h5Bzm/fPwn+PEQqqi9+dt80wden0RwivpK7hzQ8VGRjImX5dGESAYFvkStNObEpC3bLA==}
+  /@linxin666/dsh-client-ui-task-board@0.3.2:
+    resolution: {integrity: sha512-1O/Uk1+s40+UApk7qGWunIllDM0srIDduYrxtK+wYzdPL5vPPR8/W5C0a+x75O0az4e+4NvIBF3vkLehr5lcTA==}
     peerDependencies:
-      '@deepseek-ai/dsh-agent': ^0.1.1-rc.1
-      '@deepseek-ai/dsh-commands': ^0.1.1-rc.1
+      '@deepseek-ai/dsh-agent': ^0.1.1-rc.2
+      '@deepseek-ai/dsh-commands': ^0.1.1-rc.2
       react: ^18.2.0
     dependencies:
       schemastery: 3.18.0
     dev: false
 
-  /@linxin666/dsh-client-ui-web-ui-settings@0.2.7:
-    resolution: {integrity: sha512-pNyhYOfHuFvQi3t75otF6Vr0qNaOXHZAjiisBHaoWdVbEPgRpTZk6sVcsVCwnsIqlA1eRaAtlCuu7iaMZKtXBg==}
+  /@linxin666/dsh-client-ui-web-ui-settings@0.3.2:
+    resolution: {integrity: sha512-bghg/X2Z23aYksA2V99xwzfXfKroWwFcjeEiFWXGqrn03+8daTtwXvo6n6pP9PjH7CPme28n4Cs3oEwQunibIA==}
     peerDependencies:
       react: ^18.2.0
     dependencies:
       schemastery: 3.18.0
     dev: false
 
-  /@linxin666/dsh-desktop-launcher@0.2.7:
-    resolution: {integrity: sha512-xccFwkc2U6bE0mjplwCJZH+A0h9jZjYdbyNlNUL3Mb7y8JvOoNHexSVf2p8UlabQZkpzV7j9usJshf+qjG8lww==}
+  /@linxin666/dsh-desktop-launcher@0.3.2:
+    resolution: {integrity: sha512-AEb5dZqtBVMyrllSdQpXkK2yUzJ2/g54NI6BSz88qaVJxLaWdancN+6hq5SVF77zC5pGz2+hN15GR5dWFyST2A==}
     engines: {node: ^22.19.0 || >=24.0.0}
     peerDependencies:
       react: ^18.2.0
@@ -486,15 +508,27 @@ packages:
       schemastery: 3.18.0
     dev: false
 
-  /@linxin666/dsh-liangshen@0.2.7:
-    resolution: {integrity: sha512-jydnZne0PppemC/Z+flAcpAO1xvSxJLzBa+OLdJHOnKuxS9CQk0X0cg2yAvYJuV7wTdfsv5lvUOgSRFHfkIj7A==}
+  /@linxin666/dsh-doctor@0.3.2:
+    resolution: {integrity: sha512-3yUXHxtnLpMEWStTnjf38ap7b8DyUlePIXQ+VBWDI88wNXG7CqmT2Nt9IslYHYQDqVR7oejvnopO/N4SvPPpMg==}
+    engines: {node: ^22.19.0 || >=24.0.0}
+    hasBin: true
+    peerDependencies:
+      react: ^18.2.0
+      react-dom: ^18.2.0
+    dependencies:
+      js-yaml: 4.3.1
+      schemastery: 3.18.0
+    dev: false
+
+  /@linxin666/dsh-liangshen@0.3.2:
+    resolution: {integrity: sha512-lxprJZoc/NsNOvDC1y4O3pPAfuluSTwkTU4/jVBNla6LacSH8zTNnUt17aqxi1+M9PKKi/60RLA7swfA6DSc/w==}
     engines: {node: ^22.19.0 || >=24.0.0}
     dependencies:
       schemastery: 3.18.0
     dev: false
 
-  /@linxin666/dsh-pet@0.2.7:
-    resolution: {integrity: sha512-1RovZhYTuF8wmRGyrp9XJ6Agnfb0nNprTQtS32jyRfZpXgTqfVyK6M10dknw94R88NR2aaVvxAm4dlgoyBzJYA==}
+  /@linxin666/dsh-pet@0.3.2:
+    resolution: {integrity: sha512-tVJeUnSIphMJTkVyhXcotznOfyQNJQthxNAvz5R5/PXA1LCImNElTbd5MCLu1PItTULjGkd6xg065ey3reYleg==}
     engines: {node: ^22.19.0 || >=24.0.0}
     peerDependencies:
       react: ^18.2.0
@@ -504,8 +538,8 @@ packages:
       schemastery: 3.18.0
     dev: false
 
-  /@linxin666/dsh-remote-web-ui@0.2.7:
-    resolution: {integrity: sha512-BZOSbz02iAnDqKOWb7wc1xybWXctyGjRFIDDCf6A7M7v+dK4+TFUZdTkaHwRqtDh3U+R6UAn72WM9TdgwS9UuA==}
+  /@linxin666/dsh-remote-web-ui@0.3.2:
+    resolution: {integrity: sha512-wPwGcc2zbs7U96OEDJZkqQfEcGuFtAl1d2tFwjdouya/fRp2BvWnnrGulMXGziQA+RCvqI23YbjW6akLoshvnQ==}
     engines: {node: ^22.19.0 || >=24.0.0}
     peerDependencies:
       react: ^18.2.0
@@ -518,16 +552,8 @@ packages:
       zod: 4.4.3
     dev: false
 
-  /@linxin666/dsh-skins@0.2.7:
-    resolution: {integrity: sha512-dZNFkyq/UKTv9QQoQXQXVVOa7K0S2nV8M3V63pBk5LXHg6wOBbMLHR7jvRYN7tyc/sF+mzUoz5MCEo2aBM/q0w==}
-    dependencies:
-      '@linxin666/dsh-client-ui-skin-center': 0.2.7
-    transitivePeerDependencies:
-      - react
-    dev: false
-
-  /@linxin666/dsh-ssh@0.2.7:
-    resolution: {integrity: sha512-Bb2SQ8rGkQHZLHPm26cGIEYYK7beHAXKMV7szzsWuS/OCGb9vr2SVTWwV+FPK8OM0J+5ng0iyU7rVanLzAHO3A==}
+  /@linxin666/dsh-ssh@0.3.2:
+    resolution: {integrity: sha512-Ycj2vD14Xli3v+/TH1k+ScYM7WvPwkPNPV6trDiUnAVkD+UGPE10IxU2NeEcQrb6zxsX/UXJSpRDtfDVG3+g+w==}
     engines: {node: ^22.19.0 || >=24.0.0}
     peerDependencies:
       react: ^18.2.0
@@ -542,8 +568,8 @@ packages:
       - utf-8-validate
     dev: false
 
-  /@linxin666/dsh-tool-describe-image@0.2.7:
-    resolution: {integrity: sha512-KMDcF+YTEkxwkvz/LxNbrOusl2CR7JqlSRu+aR0oi27JS8GZ0ylUs+GsmxyfRvzcKmihTWCZt3E6S6FxRsvUBQ==}
+  /@linxin666/dsh-tool-describe-image@0.3.2:
+    resolution: {integrity: sha512-y8RzfUSj2fsNn1Cnty91o+3wyEsC6SlZlBoEoi6R079idOcCoZwAeo4ScFZ8/fbxhG5omFU5phbr8uS63DS8fw==}
     engines: {node: ^22.19.0 || >=24.0.0}
     peerDependencies:
       react: ^18.2.0
@@ -551,26 +577,28 @@ packages:
       schemastery: 3.18.0
     dev: false
 
-  /@linxin666/dsh-web-ui-all@0.2.7:
-    resolution: {integrity: sha512-xcocWyBXf0DIp0ejorlyHHZoD1TZ/wb4qd43HUys2KRdPrl1kt4ZYoUuXH4oYHlK//WYkiH4rvnHXts+LDLJOQ==}
+  /@linxin666/dsh-web-ui-all@0.3.2:
+    resolution: {integrity: sha512-yTDix84bUNPP5q4DKZ7w1ozBrJmh3+lL5syb6i/Ibl80qLzJMY8NQWJC2wTpyJuxy03jChP/3CJCQudSqwlssQ==}
     dependencies:
-      '@linxin666/dsh-chat-recovery': 0.2.7
-      '@linxin666/dsh-client-ui-aionui-panel': 0.2.7
-      '@linxin666/dsh-client-ui-community-plugins': 0.2.7
-      '@linxin666/dsh-client-ui-git-graph': 0.2.7
-      '@linxin666/dsh-client-ui-plugin-manager': 0.2.7
-      '@linxin666/dsh-client-ui-skill-explorer': 0.2.7
-      '@linxin666/dsh-client-ui-skin-center': 0.2.7
-      '@linxin666/dsh-client-ui-task-board': 0.2.7
-      '@linxin666/dsh-client-ui-web-ui-settings': 0.2.7
-      '@linxin666/dsh-desktop-launcher': 0.2.7
-      '@linxin666/dsh-liangshen': 0.2.7
-      '@linxin666/dsh-pet': 0.2.7
-      '@linxin666/dsh-remote-web-ui': 0.2.7
-      '@linxin666/dsh-skins': 0.2.7
-      '@linxin666/dsh-ssh': 0.2.7
-      '@linxin666/dsh-tool-describe-image': 0.2.7
-      dsh-better-sidebar: 0.14.0
+      '@linxin666/dsh-chat-recovery': 0.3.2
+      '@linxin666/dsh-client-ui-aionui-panel': 0.3.2
+      '@linxin666/dsh-client-ui-community-plugins': 0.3.2
+      '@linxin666/dsh-client-ui-git-graph': 0.3.2
+      '@linxin666/dsh-client-ui-market': 0.3.2
+      '@linxin666/dsh-client-ui-plugin-manager': 0.3.2
+      '@linxin666/dsh-client-ui-skill-explorer': 0.3.2
+      '@linxin666/dsh-client-ui-skin-center': 0.3.2
+      '@linxin666/dsh-client-ui-task-board': 0.3.2
+      '@linxin666/dsh-client-ui-web-ui-settings': 0.3.2
+      '@linxin666/dsh-desktop-launcher': 0.3.2
+      '@linxin666/dsh-doctor': 0.3.2
+      '@linxin666/dsh-liangshen': 0.3.2
+      '@linxin666/dsh-pet': 0.3.2
+      '@linxin666/dsh-remote-web-ui': 0.3.2
+      '@linxin666/dsh-ssh': 0.3.2
+      '@linxin666/dsh-tool-describe-image': 0.3.2
+      '@mlgbnb/dsh-archive-manager': 1.0.7
+      dsh-better-sidebar: 0.15.2
     transitivePeerDependencies:
       - '@deepseek-ai/cordis'
       - '@deepseek-ai/dsh-agent'
@@ -586,6 +614,7 @@ packages:
       - '@deepseek-ai/dsh-llm'
       - '@deepseek-ai/dsh-session'
       - '@deepseek-ai/dsh-settings'
+      - '@deepseek-ai/dsh-subagent'
       - '@deepseek-ai/dsh-tools'
       - bufferutil
       - cordis
@@ -602,6 +631,12 @@ packages:
     resolution: {integrity: sha512-n12NohV3mrUyUL2o93IgG/ifeW9FTyeJn3zDxkhwa8MJ9Fxg3HQMlA3RiGmD/3UnJvheztkjjQAjA2T4LmUcpw==}
     dependencies:
       '@chevrotain/types': 11.1.2
+    dev: false
+
+  /@mlgbnb/dsh-archive-manager@1.0.7:
+    resolution: {integrity: sha512-OvdrCOJN+gm9VAHvm1B0LNdf1xaRP8uOQ98qSQsstXMVqSa2jXw899P8S8hb153GgEFT9gkd6W4ZT0byjonzjg==}
+    peerDependencies:
+      react: ^18.2.0
     dev: false
 
   /@standard-schema/spec@1.1.0:
@@ -810,6 +845,10 @@ packages:
 
   /@xterm/xterm@6.0.0:
     resolution: {integrity: sha512-TQwDdQGtwwDt+2cgKDLn0IRaSxYu1tSUjgKarSDkUM0ZNiSRXFpjxEsvc/Zgc5kq5omJ+V0a8/kIM2WD3sMOYg==}
+    dev: false
+
+  /argparse@2.0.1:
+    resolution: {integrity: sha512-8+9WqebbFzpX9OR+Wa6O29asIogeRMzcGtAINdpMHHyAg10f05aSFVBbcEqGf/PXw1EjAZ+q2/bEBg3DvurK3Q==}
     dev: false
 
   /asn1@0.2.6:
@@ -1204,8 +1243,8 @@ packages:
       '@types/trusted-types': 2.0.7
     dev: false
 
-  /dsh-better-sidebar@0.14.0:
-    resolution: {integrity: sha512-bEjHvHnlNnKXkud+/A/kZ4VJvPt79ggHy/mKqEKfODPqLFpvdz7ZcoMCI3K4naPOw/0Wlqp6J3UDR9h2Wm6w4w==}
+  /dsh-better-sidebar@0.15.2:
+    resolution: {integrity: sha512-XHr7cAqxz1k60D3W9q5VAuZ64kGhnZz9M4etBaRDNNCzuJZbJTvQ/Fzgl8mY06B/PpEcgzG6PTn2RMYF3FVnGQ==}
     engines: {node: '>=20'}
     peerDependencies:
       '@deepseek-ai/cordis': ^4.0.1
@@ -1221,6 +1260,7 @@ packages:
       '@deepseek-ai/dsh-llm': ^0.1.0-rc.8
       '@deepseek-ai/dsh-session': ^0.1.0-rc.8
       '@deepseek-ai/dsh-settings': ^0.1.0-rc.8
+      '@deepseek-ai/dsh-subagent': ^0.1.0-rc.8
       '@deepseek-ai/dsh-tools': ^0.1.0-rc.8
       cordis: ^4.0.0-rc.8
       react: ^18.2.0
@@ -1253,6 +1293,7 @@ packages:
       clsx: 2.1.1
       mermaid: 11.16.1
       node-pty: 1.1.0
+      react-icons: 5.7.0
       rxjs: 7.8.2
       schemastery: 3.18.0
       ws: 8.21.3
@@ -1291,6 +1332,13 @@ packages:
 
   /jpeg-js@0.4.4:
     resolution: {integrity: sha512-WZzeDOEtTOBK4Mdsar0IqEU5sMr3vSV2RqkAIzUEV2BHnUfKGyswWFPFwK5EeDo93K3FohSHbLAjj0s1Wzd+dg==}
+    dev: false
+
+  /js-yaml@4.3.1:
+    resolution: {integrity: sha512-CY6crGq313MX8GkwvB7tzgp99vjQxY1++5y10/BKN/GUfHqWaOGQMNZkBvqSzsZKWk/ijwHlWzzkLulsGHhjWQ==}
+    hasBin: true
+    dependencies:
+      argparse: 2.0.1
     dev: false
 
   /katex@0.16.47:
@@ -1495,6 +1543,12 @@ packages:
     resolution: {integrity: sha512-NOnmBpt5Y2RWbuv0LMzsayp3lVylAHLPUTut412ZA3l+C4uw4ZVkQbjShYCQ8TCpUMdPapr4YjUqLYD6v68j+w==}
     dev: false
 
+  /pnpm@8.15.9:
+    resolution: {integrity: sha512-SZQ0ydj90aJ5Tr9FUrOyXApjOrzuW7Fee13pDzL0e1E6ypjNXP0AHDHw20VLw4BO3M1XhQHkyik6aBYWa72fgQ==}
+    engines: {node: '>=16.14'}
+    hasBin: true
+    dev: true
+
   /points-on-curve@0.2.0:
     resolution: {integrity: sha512-0mYKnYYe9ZcqMCWhUjItv/oHjvgEsfKvnUTg8sAtnHr3GVy7rGkXCb6d5cSyqrWqL4k81b9CPg3urd+T7aop3A==}
     dev: false
@@ -1510,6 +1564,12 @@ packages:
     resolution: {integrity: sha512-QpgqWi8rD9DsS9EP3z7BT+5lY5SFhsqGjpgW5DY/i3mK4M9DTBNz3ErMi8BWYEfI3L0d8GIbGmcdFAS1uIRGjA==}
     peerDependencies:
       react: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
+    dev: false
+
+  /react-icons@5.7.0:
+    resolution: {integrity: sha512-LBLy340Rzqy6+/yVhZKT3B/QpP1BZaesGqasf09HPOBzRarcDIFH0WwXlXQfE7q7ipxK4MSiC5DIBWURCny6fw==}
+    peerDependencies:
+      react: '*'
     dev: false
 
   /robust-predicates@3.0.3:

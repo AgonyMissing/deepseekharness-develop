@@ -273,6 +273,8 @@ const WEBUI_FAMILY_ROWS = [
   ['web-ui-chat-recovery', '@linxin666/dsh-chat-recovery'],
   ['web-ui-liangshen', '@linxin666/dsh-liangshen'],
   ['web-ui-skill-explorer', '@linxin666/dsh-client-ui-skill-explorer'],
+  ['web-ui-market', '@linxin666/dsh-client-ui-market'],
+  ['web-ui-archive-manager', '@mlgbnb/dsh-archive-manager'],
   ['web-ui-better-sidebar', 'dsh-better-sidebar'],
 ]
 
@@ -311,15 +313,24 @@ function syncBundledWebUiModules() {
       // Refresh the profile copy when the bundled version differs, so family
       // upgrades propagate on the next start (fresh machines copy everything).
       let bundledVersion = null
+      let bundledPatch = 0
       try {
-        bundledVersion = JSON.parse(fs.readFileSync(path.join(source, 'package.json'), 'utf8')).version
+        const sourceMeta = JSON.parse(fs.readFileSync(path.join(source, 'package.json'), 'utf8'))
+        bundledVersion = sourceMeta.version
+        bundledPatch = Number(sourceMeta.dshDesktopPatch) || 0
       } catch {}
       if (bundledVersion !== null) {
         let installedVersion = null
+        let installedPatch = 0
         try {
-          installedVersion = JSON.parse(fs.readFileSync(path.join(target, 'package.json'), 'utf8')).version
+          const targetMeta = JSON.parse(fs.readFileSync(path.join(target, 'package.json'), 'utf8'))
+          installedVersion = targetMeta.version
+          installedPatch = Number(targetMeta.dshDesktopPatch) || 0
         } catch {}
-        if (installedVersion === bundledVersion) continue
+        // Same npm version is normally a no-op, but a higher dshDesktopPatch
+        // in the bundle forces a refresh (desktop-side patches to a published
+        // package, e.g. the market background extraction).
+        if (installedVersion === bundledVersion && installedPatch >= bundledPatch) continue
       } else {
         if (fs.existsSync(path.join(target, 'package.json'))) continue
       }
@@ -384,6 +395,45 @@ function ensureWebUiFamily() {
   // The web-ui family rows are rewritten on every start so already-initialized
   // profiles pick up added rows (e.g. the 0.2.4 plugin-manager / chat-recovery
   // / desktop-launcher / skin-center rows) without manual patching.
+  // Electron's node:zlib zstd decoder crashes natively after ~20k frames
+  // (a single large session can carry 30k+ frames), so the desktop shell
+  // forces plaintext session artifacts. Kept outside the managed markers so
+  // the family rewrite never drops it.
+  try {
+    const webDir = path.join(DSH_HOME, 'profiles', 'web')
+    const webPatch = path.join(webDir, 'cordis.patch.yml')
+    let existing = ''
+    try {
+      existing = fs.readFileSync(webPatch, 'utf8')
+    } catch { /* first boot */ }
+    const plaintextRow = '- id: session-persistence-jsonl\n  config:\n    root: !!js dshHomePath(\'sessions\')\n    compression: none'
+    if (!/compression:\s*none/.test(existing)) {
+      const block = '# Desktop harness: Electron zstd crashes on large multi-frame\n' +
+        '# session logs; sessions are stored as plaintext .jsonl.\n' +
+        plaintextRow + '\n\n'
+      const next = (existing.trim() === '' ? '' : existing + '\n') + block
+      fs.mkdirSync(webDir, { recursive: true })
+      fs.writeFileSync(webPatch, next, 'utf8')
+    }
+  } catch { /* optional */ }
+  // pnpm treats the web profile as a workspace root (packages: [.]), so
+  // `dsh plugin add` (forwarded to pnpm verbatim) needs the root-add check
+  // relaxed; without it 创意工坊 plugin installs fail with
+  // ERR_PNPM_ADDING_TO_ROOT. Written idempotently so fresh installs get it too.
+  try {
+    const webDir = path.join(DSH_HOME, 'profiles', 'web')
+    const npmrcPath = path.join(webDir, '.npmrc')
+    let npmrc = ''
+    try {
+      npmrc = fs.readFileSync(npmrcPath, 'utf8')
+    } catch { /* first boot */ }
+    if (!/ignore-workspace-root-check\s*=\s*true/.test(npmrc)) {
+      fs.mkdirSync(webDir, { recursive: true })
+      const line = 'ignore-workspace-root-check=true'
+      const next = npmrc.trim() === '' ? line + '\n' : npmrc.replace(/\n?$/, '\n') + line + '\n'
+      fs.writeFileSync(npmrcPath, next, 'utf8')
+    }
+  } catch { /* optional */ }
   try {
     const webPatch = path.join(DSH_HOME, 'profiles', 'web', 'cordis.patch.yml')
     let existing = ''
@@ -649,6 +699,27 @@ function seedDshHome() {
  * the artwork behind them so text stays crisp.
  */
 const BACKGROUND_CSS = `
+/* 记忆系统侧边栏图标与其他面板（任务看板/SSH/技能中心）统一：
+   图标 18px、图标容器 24px、内边距 10px、图标与文字间距 8px，
+   让四个入口的文字首字对齐。 */
+button[data-dsh-mnemon-entry] [class*="entryIcon"] svg {
+  width: 18px !important;
+  height: 18px !important;
+}
+button[data-dsh-mnemon-entry] {
+  padding-left: 10px !important;
+  gap: 8px !important;
+}
+button[data-dsh-mnemon-entry] [class*="entryIcon"] {
+  width: 24px !important;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+button[data-dsh-ssh-entry] {
+  gap: 8px !important;
+}
 html:not([data-dsh-skin]) {
   background-color: #ffffff;
 }
@@ -1155,6 +1226,29 @@ body[data-ds-dark-theme] .dse-mcp-card select {
   background: rgba(0, 0, 0, 0.42);
   border-radius: 0 0 8px 8px;
   pointer-events: none;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+.dse-wallpaper-market-title {
+  width: 100%;
+  flex: none;
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary, #686c75);
+  margin: 6px 0 0;
+}
+.dse-wallpaper-market {
+  width: 100%;
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.dse-wallpaper-market > .dse-wallpaper-item {
+  width: 88px;
+  height: 56px;
+  flex: 0 0 auto;
+  display: block;
 }
 .dse-wallpaper-user video {
   width: 100%;
@@ -2184,31 +2278,10 @@ const EFFORT_SLIDER_JS = `(() => {
  * overlay and restarts the dsh server with it.
  */
 const MCP_MANAGER_CSS = `
-.dse-mcp-nav {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  min-height: auto;
-  padding: 9px 16px 9px 12px;
-  border: 0;
-  border-radius: 12px;
-  background: transparent;
-  color: var(--dsw-alias-label-primary, #15171b);
-  font-size: 14px;
-  line-height: 22px;
-  cursor: pointer;
-  text-align: left;
-  transition: background 140ms ease;
-}
-.dse-mcp-nav:hover { background: rgba(120, 125, 140, 0.09); }
-.dse-mcp-nav.is-active,
-.dse-mcp-nav.VOzbGW_active {
-  background: var(--dsw-specific-sidebar-nav-item-active, #dee9f8);
-  color: var(--dsw-alias-label-primary, #15171b);
-  font-weight: 600;
-}
-.dse-mcp-nav svg { width: 16px; height: 16px; flex: none; }
+/* MCP/技能 entry buttons reuse the kernel's nav cell classes so their
+   appearance, hover and selected-state animation stay identical to the
+   stock 通用设置/模型 entries. Only the icon glyph size is tuned here. */
+.dse-mcp-nav svg { width: 18px; height: 18px; flex: none; }
 .dse-skill-search input {
   max-width: 320px;
 }
@@ -2221,23 +2294,22 @@ const MCP_MANAGER_CSS = `
   position: absolute;
   inset: 0;
   z-index: 10;
-  background: transparent;
+  background: var(--dsw-alias-bg-overlay, #ffffff);
   display: flex;
-  align-items: stretch;
-  justify-content: stretch;
-  padding: 0;
+  flex-direction: column;
+  padding: 18px 20px;
 }
 .dse-mcp-options-host > .dse-mcp-overlay > .dse-mcp-card {
   width: 100%;
-  max-width: none;
-  max-height: none;
-  height: 100%;
+  height: auto;
+  flex: 1;
   border: 0;
-  border-radius: 0;
+  border-radius: 12px;
   box-shadow: none;
-  background: transparent;
-  padding: 0;
+  background: var(--dsw-alias-bg-layer-1, #ffffff);
+  padding: 0 6px 4px;
   animation: none;
+  overflow: auto;
 }
 .dse-mcp-overlay {
   position: fixed;
@@ -2451,6 +2523,39 @@ const MCP_MANAGER_JS = `(() => {
     return null
   }
 
+  function resetSectionState() {
+    // Click a kernel nav cell that is NOT the current selection so React's
+    // section state always changes; this makes switching back to any kernel
+    // section later re-run its select animation instead of being a no-op.
+    var navList = findSettingsNavList()
+    if (navList === null) return
+    var cells = qsa('button.VOzbGW_navCell:not(.dse-mcp-nav)', navList)
+    var active = null
+    for (var i = 0; i < cells.length; i++) {
+      if (cells[i].classList.contains('VOzbGW_active')) { active = cells[i]; break }
+    }
+    var target = null
+    for (var j = 0; j < cells.length; j++) {
+      if (cells[j] !== active) { target = cells[j]; break }
+    }
+    if (target !== null) target.click()
+  }
+
+  function settleHighlight(activeCell) {
+    // After React re-renders it re-applies VOzbGW_active to the section we
+    // clicked to reset; clear every kernel nav cell so only the MCP/Skill
+    // entry stays selected, mirroring a real section switch.
+    setTimeout(function () {
+      var navList = findSettingsNavList()
+      if (navList === null) return
+      qsa('[class*="VOzbGW_navCell"]', navList).forEach(function (c) {
+        if (c.classList.contains('dse-mcp-nav')) return
+        c.classList.remove('VOzbGW_active')
+      })
+      if (activeCell !== null) activeCell.classList.add('VOzbGW_active')
+    }, 250)
+  }
+
   function findSettingsOptions() {
     var dialogs = qsa('[role="dialog"][aria-modal="true"]')
     for (var i = 0; i < dialogs.length; i++) {
@@ -2466,8 +2571,10 @@ const MCP_MANAGER_JS = `(() => {
     if (options !== null) {
       inlineHost = options
       options.classList.add('dse-mcp-options-host')
-      hiddenSection = qs('[class*="_section"]', options) || null
-      if (hiddenSection) hiddenSection.style.display = 'none'
+      // The overlay is absolutely positioned over the content area (inset: 0),
+      // so the current section stays untouched below it; hiding by class never
+      // matched React's generated section nodes and caused old/new content to
+      // render together (e.g. Skill highlighted over Memory content).
       options.appendChild(overlay)
     } else {
       document.body.appendChild(overlay)
@@ -2494,14 +2601,15 @@ const MCP_MANAGER_JS = `(() => {
       var mcpCell = document.createElement('button')
       mcpCell.type = 'button'
       mcpCell.setAttribute('data-dse-mcp-nav', '')
-      mcpCell.className = 'dse-mcp-nav'
-      mcpCell.innerHTML = ICON + '<span>MCP 服务器</span>'
+      mcpCell.className = 'VOzbGW_navCell dse-mcp-nav'
+      mcpCell.innerHTML = ICON + '<span class="VOzbGW_navLabel">MCP 服务器</span>'
       navList.appendChild(mcpCell)
     }
     var mcpCell = qs('[data-dse-mcp-nav]', navList)
     if (mcpCell !== null && !mcpCell.__dseBound) {
       mcpCell.__dseBound = true
       mcpCell.addEventListener('click', function () {
+        resetSectionState()
         qsa('.dse-mcp-nav', navList).forEach(function (b) {
           b.classList.remove('is-active')
           b.classList.remove('VOzbGW_active')
@@ -2510,20 +2618,22 @@ const MCP_MANAGER_JS = `(() => {
         mcpCell.classList.add('is-active')
         mcpCell.classList.add('VOzbGW_active')
         openOverlay()
+        settleHighlight(mcpCell)
       })
     }
     if (!qs('[data-dse-skill-nav]', navList)) {
       var skillCell = document.createElement('button')
       skillCell.type = 'button'
       skillCell.setAttribute('data-dse-skill-nav', '')
-      skillCell.className = 'dse-mcp-nav'
-      skillCell.innerHTML = SKILL_ICON + '<span>技能</span>'
+      skillCell.className = 'VOzbGW_navCell dse-mcp-nav'
+      skillCell.innerHTML = SKILL_ICON + '<span class="VOzbGW_navLabel">技能</span>'
       navList.appendChild(skillCell)
     }
     var skillCell = qs('[data-dse-skill-nav]', navList)
     if (skillCell !== null && !skillCell.__dseBound) {
       skillCell.__dseBound = true
       skillCell.addEventListener('click', function () {
+        resetSectionState()
         qsa('.dse-mcp-nav', navList).forEach(function (b) {
           b.classList.remove('is-active')
           b.classList.remove('VOzbGW_active')
@@ -2532,6 +2642,7 @@ const MCP_MANAGER_JS = `(() => {
         skillCell.classList.add('is-active')
         skillCell.classList.add('VOzbGW_active')
         openSkillsOverlay()
+        settleHighlight(skillCell)
       })
     }
   }
@@ -2754,10 +2865,8 @@ const MCP_MANAGER_JS = `(() => {
       overlay = null
     }
     if (inlineHost !== null) {
-      if (hiddenSection !== null) hiddenSection.style.display = ''
       inlineHost.classList.remove('dse-mcp-options-host')
       inlineHost = null
-      hiddenSection = null
     }
   }
 
@@ -2913,6 +3022,18 @@ const MCP_MANAGER_JS = `(() => {
       mountNav()
     }, 0)
   }
+  // Robust close: any mousedown outside the overlay and outside the MCP/Skill
+  // nav entries closes the overlay, even if a React re-render replaced the
+  // settings nav list (and therefore its click listeners). Without this, the
+  // MCP/Skill panel can stay pinned on top of archive/workshop/memory pages.
+  document.addEventListener('mousedown', function (ev) {
+    if (overlay === null) return
+    var target = ev.target
+    if (!target || typeof target.closest !== 'function') return
+    if (target.closest('.dse-mcp-overlay') !== null) return
+    if (target.closest('.dse-mcp-nav') !== null) return
+    closeOverlay()
+  }, true)
   new MutationObserver(scheduleMount).observe(document.body, { childList: true, subtree: true })
   mountNav()
   setInterval(mountNav, 2000)
@@ -3212,6 +3333,13 @@ function startServer() {
         // routed through the hidden-console launcher so no black window can
         // flash even from nested spawns.
         DSH_HIDE_LAUNCHER: launcherPath,
+        // Let the web-ui plugin-manager find the bundled dsh CLI and pnpm so
+        // 创意工坊 (market) plugin installs work inside the desktop shell.
+        PATH: [
+          process.env.PATH || '',
+          path.join(__dirname, 'resources', 'dsh', 'node_modules', '.bin'),
+          path.join(__dirname, 'resources', 'dsh-web-ui', 'node_modules', '.bin'),
+        ].filter(Boolean).join(path.delimiter),
       },
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
@@ -3243,7 +3371,10 @@ function startServer() {
       reject(error)
     })
     child.on('exit', (code, signal) => {
-      if (serverUrl !== null) return
+      if (serverUrl !== null) {
+        console.error(`[dsh-server] exited post-ready code=${code} signal=${signal}\n${stderr.slice(-4000)}`)
+        return
+      }
       clearTimeout(timeout)
       const error = new Error(
         `dsh server exited before ready (code ${code}, signal ${signal})${stderr ? `:\n${stderr.slice(-2000)}` : ''}`,
@@ -3566,6 +3697,7 @@ async function injectBackgroundWhenReady(win) {
         }
         function applyUserMedia(marker) {
           if (!marker) return
+          try { localStorage.removeItem('dsh.ui-aqua.wallpaperMarketId') } catch (e) {}
           setAquaStorage('dsh.ui-aqua.wallpaper', marker)
           setAquaStorage('dsh.ui-aqua.background', 'wallpaper')
           try {
@@ -3576,6 +3708,7 @@ async function injectBackgroundWhenReady(win) {
           if (b) syncUserWallpaper(b)
         }
         function applyBuiltIn(name) {
+          try { localStorage.removeItem('dsh.ui-aqua.wallpaperMarketId') } catch (e) {}
           fetch('/wallpapers/' + name + '.jpg').then(function (res) { return res.blob() }).then(function (blob) {
             return new Promise(function (resolve, reject) {
               var reader = new FileReader()
@@ -3791,10 +3924,72 @@ async function injectBackgroundWhenReady(win) {
             }
           }
           box.querySelectorAll('.dse-wallpaper-item').forEach(function (item) {
-            if (item.hasAttribute('data-user')) return
+            if (item.hasAttribute('data-user') || item.hasAttribute('data-market-id')) return
             var url = item.getAttribute('data-wallpaper')
             var name = url.split('/').pop().replace('.jpg', '')
             item.classList.toggle('is-active', isBuiltIn && source === name)
+          })
+        }
+        function marketWpMeta() {
+          try {
+            var list = JSON.parse(localStorage.getItem('dseMarketWallpapers') || '[]')
+            return Array.isArray(list) ? list : []
+          } catch (e) { return [] }
+        }
+        function syncMarketActive(box) {
+          var mid = ''
+          try { mid = localStorage.getItem('dsh.ui-aqua.wallpaperMarketId') || '' } catch (e) {}
+          box.querySelectorAll('.dse-wallpaper-market').forEach(function (tile) {
+            tile.classList.toggle('is-active', mid !== '' && tile.getAttribute('data-market-id') === mid)
+          })
+        }
+        function applyMarketWallpaper(id, name) {
+          idbGet('market-skin:' + id).then(function (blob) {
+            if (!blob) return
+            var reader = new FileReader()
+            reader.onload = function () {
+              try {
+                localStorage.setItem('dsh.ui-aqua.wallpaperMarketId', id)
+              } catch (e) {}
+              applyWallpaperLive(reader.result, name, builtInFingerprint(reader.result))
+              var box = document.querySelector('.dse-wallpaper-box')
+              if (box) { syncMarketActive(box); syncUserWallpaper(box) }
+            }
+            reader.onerror = function () {}
+            reader.readAsDataURL(blob)
+          })
+        }
+        function renderMarketTiles(box) {
+          var wrap = box.querySelector('.dse-wallpaper-market')
+          if (!wrap) return
+          var meta = marketWpMeta()
+          var fp = JSON.stringify(meta)
+          if (wrap.getAttribute('data-fp') === fp) { syncMarketActive(box); return }
+          wrap.setAttribute('data-fp', fp)
+          wrap.querySelectorAll('.dse-wallpaper-market').forEach(revokeUserMedia)
+          wrap.innerHTML = ''
+          meta.forEach(function (m) {
+            idbGet('market-skin:' + m.id).then(function (blob) {
+              if (!blob) return
+              var url = URL.createObjectURL(blob)
+              var tile = document.createElement('div')
+              tile.className = 'dse-wallpaper-item dse-wallpaper-market'
+              tile.setAttribute('data-market-id', m.id)
+              tile.setAttribute('data-market-name', m.name || m.id)
+              tile._mediaUrl = url
+              var img = document.createElement('img')
+              img.src = url
+              img.alt = ''
+              var small = document.createElement('small')
+              small.textContent = m.name || m.id
+              tile.appendChild(img)
+              tile.appendChild(small)
+              tile.addEventListener('click', function () {
+                applyMarketWallpaper(m.id, m.name || m.id)
+              })
+              wrap.appendChild(tile)
+              syncMarketActive(box)
+            })
           })
         }
         function mountWallpaperBox() {
@@ -3822,6 +4017,8 @@ async function injectBackgroundWhenReady(win) {
               '<div class="dse-wallpaper-grid">' +
                 '<div class="dse-wallpaper-item dse-wallpaper-user" data-user="image" hidden><img src="" alt="我的上传"><small>我的上传</small></div>' +
                 grid +
+                '<div class="dse-wallpaper-market-title">创意工坊背景</div>' +
+                '<div class="dse-wallpaper-market"></div>' +
                 '<div class="dse-wallpaper-upload" data-upload="image"><span>＋</span><small>上传图片</small></div>' +
               '</div>' +
             '</div>' +
@@ -3882,14 +4079,24 @@ async function injectBackgroundWhenReady(win) {
                 localStorage.removeItem('dsh.ui-aqua.lastUserImage')
               }
             } catch (e) {}
+            try {
+              var marketId = localStorage.getItem('dsh.ui-aqua.wallpaperMarketId') || ''
+              if (marketId) {
+                var rest = marketWpMeta().filter(function (m) { return m.id !== marketId })
+                localStorage.setItem('dseMarketWallpapers', JSON.stringify(rest))
+                idbDel('market-skin:' + marketId)
+                localStorage.removeItem('dsh.ui-aqua.wallpaperMarketId')
+              }
+            } catch (e) {}
             applyBuiltIn('whale')
           })
           syncUserWallpaper(box)
+          renderMarketTiles(box)
           if (!window.__dseWallpaperWatcher) {
             window.__dseWallpaperWatcher = true
             setInterval(function () {
               var b = document.querySelector('.dse-wallpaper-box')
-              if (b) syncUserWallpaper(b)
+              if (b) { syncUserWallpaper(b); renderMarketTiles(b) }
             }, 800)
           }
         }
@@ -4119,7 +4326,14 @@ async function createWindow() {
   })
 
   await mainWindow.loadURL(serverUrl)
-  if (SMOKE || !HIDDEN_START) mainWindow.show()
+  if (SMOKE || !HIDDEN_START) {
+    // Force the window to the foreground: plain show() can leave the window
+    // pinned to the taskbar when the process inherited a hidden startup flag.
+    mainWindow.show()
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.focus()
+    mainWindow.moveTop()
+  }
   await injectThemeGuard(mainWindow)
   if (SMOKE) {
     await injectBackgroundWhenReady(mainWindow)

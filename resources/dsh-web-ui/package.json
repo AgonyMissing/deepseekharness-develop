@@ -1,23 +1,29 @@
 {
   "name": "dsh-web-ui-bundled",
-  "version": "0.2.7",
+  "version": "0.3.2",
   "private": true,
   "description": "Bundled dsh-web-ui family (installed artifacts; do not edit)",
   "dependencies": {
-    "@linxin666/dsh-web-ui-all": "0.2.7",
-    "@linxin666/dsh-client-ui-web-ui-settings": "0.2.7",
-    "@linxin666/dsh-client-ui-plugin-manager": "0.2.7",
-    "@linxin666/dsh-client-ui-community-plugins": "0.2.7",
-    "@linxin666/dsh-client-ui-aionui-panel": "0.2.7",
-    "@linxin666/dsh-client-ui-task-board": "0.2.7",
-    "@linxin666/dsh-client-ui-git-graph": "0.2.7",
-    "@linxin666/dsh-remote-web-ui": "0.2.7",
-    "@linxin666/dsh-ssh": "0.2.7",
-    "@linxin666/dsh-tool-describe-image": "0.2.7",
-    "@linxin666/dsh-chat-recovery": "0.2.7",
-    "@linxin666/dsh-liangshen": "0.2.7",
-    "@linxin666/dsh-client-ui-skill-explorer": "0.2.7",
-    "@linxin666/dsh-desktop-launcher": "0.2.7",
-    "dsh-better-sidebar": "0.14.0"
+    "@linxin666/dsh-web-ui-all": "0.3.2",
+    "@linxin666/dsh-client-ui-web-ui-settings": "0.3.2",
+    "@linxin666/dsh-client-ui-plugin-manager": "0.3.2",
+    "@linxin666/dsh-client-ui-community-plugins": "0.3.2",
+    "@linxin666/dsh-client-ui-market": "0.3.2",
+    "@linxin666/dsh-client-ui-aionui-panel": "0.3.2",
+    "@linxin666/dsh-client-ui-task-board": "0.3.2",
+    "@linxin666/dsh-client-ui-git-graph": "0.3.2",
+    "@linxin666/dsh-remote-web-ui": "0.3.2",
+    "@linxin666/dsh-ssh": "0.3.2",
+    "@linxin666/dsh-tool-describe-image": "0.3.2",
+    "@linxin666/dsh-chat-recovery": "0.3.2",
+    "@linxin666/dsh-liangshen": "0.3.2",
+    "@linxin666/dsh-client-ui-skill-explorer": "0.3.2",
+    "@linxin666/dsh-desktop-launcher": "0.3.2",
+    "@linxin666/dsh-doctor": "0.3.2",
+    "@mlgbnb/dsh-archive-manager": "1.0.7",
+    "dsh-better-sidebar": "0.15.2"
+  },
+  "devDependencies": {
+    "pnpm": "8.15.9"
   }
 }

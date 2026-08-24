@@ -82,9 +82,15 @@ function Update-PetSummonPatch {
     return
   }
   $raw = [IO.File]::ReadAllText($Path)
-  $pattern = '(?s)(\t\t\tconst display = snapshot\?\.display \?\? DEFAULT_DISPLAY;\r?\n)[\s\S]*?(\r?\n\t\t\}\r?\n\t\t//#endregion src/contracts/renderer)'
+  # 0.2.x: PetDockEntry 的召唤按钮分支以带路径的 //#endregion src/contracts/renderer 结尾
+  $patternLegacy = '(?s)(\t\t\tconst display = snapshot\?\.display \?\? DEFAULT_DISPLAY;\r?\n)[\s\S]*?(\r?\n\t\t\}\r?\n\t\t//#endregion src/contracts/renderer)'
+  # 0.3.x: 结尾变成裸 //#endregion（紧接着 //#region src/contracts/renderer.ts）
+  $patternNew = '(?s)(\t\t\tconst display = snapshot\?\.display \?\? DEFAULT_DISPLAY;\r?\n)[\s\S]*?(\r?\n\t\t\}\r?\n\t\t//#endregion\r?\n)'
   $replacement = '$1' + "`t`t`treturn null;" + '$2'
-  $next = [regex]::Replace($raw, $pattern, $replacement)
+  $next = [regex]::Replace($raw, $patternLegacy, $replacement)
+  if ($next -eq $raw) {
+    $next = [regex]::Replace($raw, $patternNew, $replacement)
+  }
   if ($next -eq $raw) {
     if ($raw -match '(?s)DEFAULT_DISPLAY;\r?\n\t\t\treturn null;') {
       Write-Output "already patched: $Path"
@@ -158,6 +164,168 @@ function Update-RemotePortPatch {
   }
 }
 Update-RemotePortPatch (Join-Path $root 'resources\dsh-web-ui\node_modules\@linxin666\dsh-remote-web-ui\lib\client.js')
+
+Write-Step '应用创意工坊皮肤背景图提取补丁（皮肤安装只装背景图，不装皮肤插件）'
+function Update-MarketWallpaperPatch {
+  param([string]$Path)
+  if (-not (Test-Path $Path)) {
+    Write-Warning "缺少文件: $Path"
+    return
+  }
+  $raw = [IO.File]::ReadAllText($Path)
+  if ($raw.Contains('const MARKET_WP_KEY = "dseMarketWallpapers";')) {
+    Write-Output "already patched: $Path"
+    return
+  }
+  $anchor = "optional pluginManager service (with the copy-command degradation).`n`t`t*/"
+  $helperBlock = @'
+		/** Desktop harness: a skin "install" extracts the skin's background
+		 *  image into the wallpaper gallery (通用设置 → 壁纸) instead of installing
+		 *  the whole skin plugin. The blob lives in the same IndexedDB store the
+		 *  aqua wallpaper layer reads; metadata stays in localStorage. */
+		const MARKET_WP_KEY = "dseMarketWallpapers";
+		function marketWpList() {
+			try {
+				const raw = window.localStorage.getItem(MARKET_WP_KEY);
+				const list = JSON.parse(raw || "[]");
+				return Array.isArray(list) ? list : [];
+			} catch {
+				return [];
+			}
+		}
+		function marketWpSave(list) {
+			try {
+				window.localStorage.setItem(MARKET_WP_KEY, JSON.stringify(list));
+			} catch {}
+		}
+		function openMarketDb() {
+			return new Promise((resolve, reject) => {
+				const req = indexedDB.open("dsh-aqua-media", 1);
+				req.onupgradeneeded = () => {
+					const db = req.result;
+					if (!db.objectStoreNames.contains("wallpaper")) db.createObjectStore("wallpaper");
+				};
+				req.onsuccess = () => resolve(req.result);
+				req.onerror = () => reject(req.error || new Error("idb open failed"));
+			});
+		}
+		function marketWpPut(key, blob) {
+			return openMarketDb().then((db) => new Promise((resolve, reject) => {
+				const tx = db.transaction("wallpaper", "readwrite");
+				tx.objectStore("wallpaper").put(blob, key);
+				tx.oncomplete = () => {
+					db.close();
+					resolve();
+				};
+				tx.onerror = () => {
+					db.close();
+					reject(tx.error);
+				};
+				tx.onabort = () => {
+					db.close();
+					reject(tx.error || new Error("idb abort"));
+				};
+			}));
+		}
+		async function extractSkinBackground(item) {
+			const bg = item.contributes?.backgroundMedia?.light?.src
+				|| item.contributes?.backgroundMedia?.dark?.src
+				|| item.preview?.light;
+			if (!bg) throw new Error("skin has no background media");
+			const res = await fetch("https://dsh-market.com/" + bg);
+			if (!res.ok) throw new Error("download failed: HTTP " + res.status);
+			const blob = await res.blob();
+			if (blob.type !== "" && !blob.type.startsWith("image/")) throw new Error("not an image: " + blob.type);
+			const id = item.id;
+			await marketWpPut("market-skin:" + id, blob);
+			const list = marketWpList().filter((entry) => entry.id !== id);
+			list.push({ id, name: item.name ?? item.nameEn ?? item.displayName ?? id });
+			marketWpSave(list);
+		}
+'@
+  if (-not $raw.Contains($anchor)) {
+    Write-Warning "未能匹配市场卡片注释锚点: $Path（可能需要人工检查）"
+    return
+  }
+  $next = $raw.Replace($anchor, $anchor + "`n" + $helperBlock)
+  $oldInstalled = 'const installedHere = tab === "skin" ? installed.skins.includes(id) : tab === "pet" ? installed.pets.includes(id) : entryInstalled(item, pluginList ?? []) !== null;'
+  $newInstalled = 'const installedHere = tab === "skin" ? installed.skins.includes(id) || marketWpList().some((w) => w.id === id) : tab === "pet" ? installed.pets.includes(id) : entryInstalled(item, pluginList ?? []) !== null;'
+  if (-not $next.Contains($oldInstalled)) {
+    Write-Warning "未能匹配 installedHere 锚点: $Path（可能需要人工检查）"
+    return
+  }
+  $next = $next.Replace($oldInstalled, $newInstalled)
+  $oldInstall = @'
+			const onInstallAsset = (kind, id) => {
+				if (gateway === null || installing !== null) return;
+				installAssetKind(kind, id, false);
+			};
+'@
+  $newInstall = @'
+			const onInstallAsset = (kind, id) => {
+				if (gateway === null || installing !== null) return;
+				if (kind === "skin") {
+					onInstallSkinBackground(id);
+					return;
+				}
+				installAssetKind(kind, id, false);
+			};
+			const onInstallSkinBackground = async (id) => {
+				const item = (data?.items?.skin || []).find((entry) => entry.id === id);
+				if (!item) return;
+				const key = "skin:" + id;
+				setInstalling(key);
+				try {
+					await extractSkinBackground(item);
+					setInstalled((prev) => prev.skins.includes(id) ? prev : { ...prev, skins: [...prev.skins, id] });
+					callout(id, t("skinBackgroundInstalled"));
+				} catch (err) {
+					callout(id, t("installFailed", { reason: messageOf(err) }));
+				} finally {
+					setInstalling(null);
+				}
+			};
+'@
+  if (-not $next.Contains($oldInstall)) {
+    Write-Warning "未能匹配 onInstallAsset 锚点: $Path（可能需要人工检查）"
+    return
+  }
+  $next = $next.Replace($oldInstall, $newInstall)
+  $oldZh = '"installedAt": "安装到 {path}",'
+  $newZh = $oldZh + "`n`t`t`t" + '"skinBackgroundInstalled": "背景图已添加到壁纸库（通用设置 → 壁纸）",'
+  $oldEn = '"installedAt": "Installed to {path}",'
+  $newEn = $oldEn + "`n`t`t`t" + '"skinBackgroundInstalled": "Background added to wallpaper gallery (General settings → Wallpaper)",'
+  if (-not $next.Contains($oldZh) -or -not $next.Contains($oldEn)) {
+    Write-Warning "未能匹配 locale 锚点: $Path（可能需要人工检查）"
+    return
+  }
+  $next = $next.Replace($oldZh, $newZh).Replace($oldEn, $newEn)
+  [IO.File]::WriteAllText($Path, $next)
+  Write-Output "patched: $Path"
+}
+Update-MarketWallpaperPatch (Join-Path $root 'resources\dsh-web-ui\node_modules\@linxin666\dsh-client-ui-market\lib\client.js')
+
+function Update-MarketPackagePatch {
+  param([string]$Path)
+  if (-not (Test-Path $Path)) {
+    Write-Warning "缺少文件: $Path"
+    return
+  }
+  $raw = [IO.File]::ReadAllText($Path)
+  if ($raw.Contains('"dshDesktopPatch"')) {
+    Write-Output "already patched: $Path"
+    return
+  }
+  $anchor = '"version": "0.3.2",'
+  if (-not $raw.Contains($anchor)) {
+    Write-Warning "未能匹配 market package.json 版本锚点: $Path（可能需要人工检查）"
+    return
+  }
+  $next = $raw.Replace($anchor, $anchor + "`n  " + '"dshDesktopPatch": 1,')
+  [IO.File]::WriteAllText($Path, $next)
+  Write-Output "patched: $Path"
+}
+Update-MarketPackagePatch (Join-Path $root 'resources\dsh-web-ui\node_modules\@linxin666\dsh-client-ui-market\package.json')
 
 Write-Step '应用工作区卫生规则（standard 预设）'
 function Update-WorkspaceHygiene {
