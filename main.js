@@ -2315,25 +2315,23 @@ const MCP_MANAGER_CSS = `
   position: fixed;
   inset: 0;
   z-index: 2147483000;
-  background: rgba(15, 23, 42, 0.38);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
+  background: var(--dsw-alias-bg-overlay, #ffffff);
+  display: block;
+  padding: 0;
   font-family: system-ui, -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
 }
 .dse-mcp-card {
-  width: 560px;
-  max-width: calc(100vw - 48px);
-  max-height: min(78vh, 720px);
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
   display: flex;
   flex-direction: column;
-  background: var(--dsw-alias-bg-overlay, #ffffff);
-  border: 1px solid var(--dsw-alias-border-l2, rgba(121, 126, 145, 0.2));
-  border-radius: 18px;
-  box-shadow: 0 24px 64px rgba(18, 24, 42, 0.25);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
   overflow: hidden;
-  animation: dseMcpIn 0.2s cubic-bezier(0.22, 1, 0.36, 1);
 }
 @keyframes dseMcpIn {
   from { opacity: 0; transform: translateY(8px) scale(0.98); }
@@ -2486,8 +2484,8 @@ const MCP_MANAGER_CSS = `
   overflow: hidden;
 }
 .dse-skill-card {
-  width: 640px;
-  min-height: 440px;
+  width: 100% !important;
+  min-height: 0;
 }
 .dse-skill-count { font-size: 11px; color: var(--dsw-alias-label-tertiary, #9296a0); }
 .dse-skill-search input { width: 100%; }
@@ -2569,16 +2567,22 @@ const MCP_MANAGER_JS = `(() => {
   function mountOverlay() {
     var options = findSettingsOptions()
     if (options !== null) {
-      inlineHost = options
-      options.classList.add('dse-mcp-options-host')
-      // The overlay is absolutely positioned over the content area (inset: 0),
-      // so the current section stays untouched below it; hiding by class never
-      // matched React's generated section nodes and caused old/new content to
-      // render together (e.g. Skill highlighted over Memory content).
-      options.appendChild(overlay)
-    } else {
-      document.body.appendChild(overlay)
+      // Fixed-position the overlay over the settings content area's viewport
+      // rect and mount it on <body>. absolute inset:0 ended up offset (the
+      // content region scrolls), leaving the general settings (glass/blur/
+      // wallpaper) visible underneath. Fixed + explicit rect always covers it
+      // and never blocks the nav column.
+      var r = options.getBoundingClientRect()
+      overlay.style.position = 'fixed'
+      overlay.style.right = 'auto'
+      overlay.style.bottom = 'auto'
+      overlay.style.left = r.left + 'px'
+      overlay.style.top = r.top + 'px'
+      overlay.style.width = r.width + 'px'
+      overlay.style.height = r.height + 'px'
+      overlay.style.zIndex = '1000'
     }
+    document.body.appendChild(overlay)
   }
 
   function mountNav() {
@@ -2864,10 +2868,8 @@ const MCP_MANAGER_JS = `(() => {
       overlay.remove()
       overlay = null
     }
-    if (inlineHost !== null) {
-      inlineHost.classList.remove('dse-mcp-options-host')
-      inlineHost = null
-    }
+    inlineHost = null
+    hiddenSection = null
   }
 
   function api(path, options) {
