@@ -316,11 +316,14 @@ function Update-MarketPackagePatch {
     Write-Output "already patched: $Path"
     return
   }
-  $anchor = '"version": "0.3.2",'
-  if (-not $raw.Contains($anchor)) {
+  # Match the top-level version field for any 0.x release so future bumps
+  # do not silently break this idempotent patch.
+  $match = [regex]::Match($raw, '"version":\s*"0\.\d+\.\d+",')
+  if (-not $match.Success) {
     Write-Warning "未能匹配 market package.json 版本锚点: $Path（可能需要人工检查）"
     return
   }
+  $anchor = $match.Value
   $next = $raw.Replace($anchor, $anchor + "`n  " + '"dshDesktopPatch": 1,')
   [IO.File]::WriteAllText($Path, $next)
   Write-Output "patched: $Path"

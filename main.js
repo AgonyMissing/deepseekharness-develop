@@ -3058,15 +3058,30 @@ const TOOLTIP_FIX_JS = `(() => {
   const position = (tip, clone) => {
     const anchor = tip.parentElement
     if (!anchor) return
-    const hovered = anchor.querySelector(':hover') || anchor.querySelector('button:focus') || anchor
-    const ar = hovered.getBoundingClientRect()
+    // The stock tooltip's host wrapper is an empty zero-size node, so its own
+    // rect is useless and querySelector(':hover') would hand back the widest
+    // container (whole chat/composer) whose left edge flips the tooltip off
+    // screen. Walk the :hover chain (document order = ancestor to descendant)
+    // and keep the LAST element with a real box -- the innermost hovered
+    // span/button the tooltip belongs to. That box is stable, unlike the
+    // smallest-area pick which can bounce between sibling segments.
+    let anchorEl = anchor.querySelector('button:focus') || anchor
+    for (const el of anchor.querySelectorAll(':hover')) {
+      const r = el.getBoundingClientRect()
+      if (r.width > 0 && r.height > 0) anchorEl = el
+    }
+    const ar = anchorEl.getBoundingClientRect()
     const h = clone.offsetHeight || 26
     const w = clone.offsetWidth || 40
     const top = ar.top + h > window.innerHeight - 8 ? window.innerHeight - h - 8 : ar.top
     clone.style.position = 'fixed'
-    // Prefer the right side, flip to the left when there is no room.
-    let left = ar.right + 8
-    if (left + w > window.innerWidth - 8) left = ar.left - w - 8
+    // Centre the tooltip horizontally on the hovered element, then keep it
+    // inside the viewport so a wide tooltip near the right edge never slips
+    // off-screen. This is the placement that was broken in compat/mica.
+    let left = ar.left + (ar.width - w) / 2
+    const minLeft = 8
+    const maxLeft = Math.max(minLeft, window.innerWidth - w - 8)
+    left = Math.max(minLeft, Math.min(left, maxLeft))
     clone.style.left = Math.round(left) + 'px'
     clone.style.top = Math.round(top) + 'px'
     clone.style.zIndex = '1000'
