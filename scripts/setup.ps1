@@ -330,6 +330,49 @@ function Update-MarketPackagePatch {
 }
 Update-MarketPackagePatch (Join-Path $root 'resources\dsh-web-ui\node_modules\@linxin666\dsh-client-ui-market\package.json')
 
+Write-Step '应用目录选择器桌面端委托补丁'
+$dpTarget = Join-Path $root 'resources\dsh\node_modules\@deepseek-ai\dsh-host-directory-picker-native\lib\index.js'
+if (Test-Path $dpTarget) {
+  $dpRaw = [IO.File]::ReadAllText($dpTarget)
+  if ($dpRaw.Contains('Desktop shell delegation')) {
+    Write-Output "already patched: $dpTarget"
+  } else {
+    $dpAnchor = "async function pickNativeDirectory(signal, internals = {}) {"
+    $dpBodyStart = "`tconst platform = internals.platform ?? process.platform;`r?`n`tconst run = internals.run ?? runNativeCommand;"
+    $dpInsert = @'
+	// Desktop shell delegation: when DSH_DESKTOP_DIALOG_PORT is set, the
+	// Electron main process exposes a loopback /pick endpoint that shows
+	// its own native folder dialog — bypassing the Win32 worker spawn that
+	// fails inside the packaged Electron runtime.
+	const desktopDialogPort = process.env.DSH_DESKTOP_DIALOG_PORT;
+	if (desktopDialogPort && platform === "win32") {
+		try {
+			const url = `http://127.0.0.1:${desktopDialogPort}/pick`;
+			const resp = await globalThis.fetch(url, { signal });
+			const body = await resp.json();
+			if (body.error) throw new Error(body.error);
+			return body.path ?? null;
+		} catch (fetchError) {
+			if (fetchError.code === 'ECONNREFUSED' || fetchError.cause?.code === 'ECONNREFUSED') {
+				throw new Error("desktop dialog server is not running; cannot open folder picker");
+			}
+			throw fetchError;
+		}
+	}
+'@
+    $dpInsert = $dpInsert.TrimEnd("`r", "`n")
+    $dpNext = $dpRaw.Replace($dpBodyStart, $dpBodyStart + "`n" + $dpInsert)
+    if ($dpNext -eq $dpRaw) {
+      Write-Warning "未能自动匹配目录选择器补丁位置: $dpTarget（可能需要人工检查）"
+    } else {
+      [IO.File]::WriteAllText($dpTarget, $dpNext)
+      Write-Output "patched: $dpTarget"
+    }
+  }
+} else {
+  Write-Warning "缺少文件: $dpTarget"
+}
+
 Write-Step '应用工作区卫生规则（standard 预设）'
 function Update-WorkspaceHygiene {
   param([string]$Path)
