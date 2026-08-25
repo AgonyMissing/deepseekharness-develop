@@ -19,6 +19,9 @@ jobs:
           version: 8
       - name: Install root deps
         run: npm install
+      - name: Install dsh kernel deps (native pty / ripgrep)
+        working-directory: resources/dsh
+        run: pnpm install --ignore-scripts
       - name: Install dsh-web-ui deps
         working-directory: resources/dsh-web-ui
         run: pnpm install --ignore-scripts
@@ -41,6 +44,9 @@ jobs:
           version: 8
       - name: Install root deps
         run: npm install
+      - name: Install dsh kernel deps (native pty / ripgrep)
+        working-directory: resources/dsh
+        run: pnpm install --ignore-scripts
       - name: Install dsh-web-ui deps
         working-directory: resources/dsh-web-ui
         run: pnpm install --ignore-scripts
