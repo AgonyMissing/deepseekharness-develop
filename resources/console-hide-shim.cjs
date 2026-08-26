@@ -17,6 +17,10 @@ if (!globalThis.__dshConsoleHideShim) {
 
   const cp = require('node:child_process')
   const path = require('node:path')
+  const _fs = require('node:fs')
+  const _os = require('node:os')
+  const _dbgLog = path.join(_os.homedir(), 'dsh-spawn-debug.log')
+  const _log = (msg) => { try { _fs.appendFileSync(_dbgLog, new Date().toISOString() + ' [' + process.pid + '] ' + msg + '\n') } catch {} }
   const LAUNCHER = process.env.DSH_HIDE_LAUNCHER || path.join(__dirname, 'hidden-console-launcher.exe')
   // Single argv token: NODE_OPTIONS cannot carry a path with spaces (the
   // installer directory is "...\DeepSeek Harness\..."), but argv tokens are
@@ -51,10 +55,20 @@ if (!globalThis.__dshConsoleHideShim) {
       base.endsWith('.cmd') || base.endsWith('.bat')
   }
 
+  /** Rewrite args so the target runs inside the hidden-console launcher. */
+  const routeThroughLauncher = (args) => {
+    const fileArg = args[0]
+    const fileArgs = Array.isArray(args[1]) ? args[1] : []
+    args[0] = LAUNCHER
+    args[1] = [fileArg, ...fileArgs]
+  }
+
   const patchChildProcess = (name) => {
     const original = cp[name]
     cp[name] = function (...args) {
       let command = String(args[0])
+      const cmdBase = String(command).toLowerCase().split(/[\\/]/).pop() || ''
+      _log(`[${name}] command=${command} args=${JSON.stringify(args[1]).slice(0,300)}`)
       if (name === 'spawn') {
         let opts = null
         for (let index = args.length - 1; index >= 0; index--) {
@@ -68,10 +82,19 @@ if (!globalThis.__dshConsoleHideShim) {
           opts.shell = false
           command = LAUNCHER
         } else if (isSandboxRunnerSpawn(command, args[1]) || isConsoleShell(command)) {
+          _log(`  → LAUNCHER routing (spawn): ${command}`)
           args[0] = LAUNCHER
           args[1] = [command, ...(Array.isArray(args[1]) ? args[1] : [])]
           command = LAUNCHER
         }
+      }
+      // spawnSync / execFile / execFileSync call libuv directly, bypassing
+      // child_process.spawn — so the spawn launcher routing never fires.
+      // Route console shells through the hidden-console launcher here too.
+      if ((name === 'spawnSync' || name === 'execFile' || name === 'execFileSync') && isConsoleShell(command)) {
+        _log(`  → LAUNCHER routing (${name}): ${command}`)
+        routeThroughLauncher(args)
+        command = LAUNCHER
       }
       if (name === 'spawn' || name === 'spawnSync' || name === 'execFile' || name === 'execFileSync') {
         const argv = Array.isArray(args[1]) ? args[1] : null
@@ -107,6 +130,79 @@ if (!globalThis.__dshConsoleHideShim) {
   for (const name of ['spawn', 'spawnSync', 'exec', 'execSync', 'execFile', 'execFileSync', 'fork']) {
     patchChildProcess(name)
   }
+
+  // Hook koffi so the sandbox's CreateProcessAsUserW calls set
+  // STARTF_USESHOWWINDOW + SW_HIDE on the STARTUPINFOW.  The sandbox
+  // intentionally omits CREATE_NO_WINDOW (it causes STATUS_DLL_INIT_FAILED
+  // under the restricted token), but SW_HIDE on the startup info is safe:
+  // the console is still allocated (DLLs init fine) and the child inherits
+  // the parent's hidden console — the flag just ensures the window stays
+  // invisible even when a new console is allocated.
+  try {
+    const _Module = require('module')
+    const _origLoad = _Module._load
+    _Module._load = function (request, parent, isMain) {
+      const result = _origLoad.apply(this, arguments)
+      if (request !== 'koffi' || result == null || typeof result.bind !== 'function') return result
+      const koffi = result
+      const origBind = koffi.bind
+      let _shadowSI = null
+      const PVOID = koffi.pointer('void')
+      function getShadowSI () {
+        if (_shadowSI !== null) return _shadowSI
+        _shadowSI = koffi.struct('_DSH_SHADOW_SI', {
+          cb: 'uint32', lpReserved: 'str16', lpDesktop: 'str16',
+          lpTitle: 'str16', dwX: 'uint32', dwY: 'uint32',
+          dwXSize: 'uint32', dwYSize: 'uint32',
+          dwXCountChars: 'uint32', dwYCountChars: 'uint32',
+          dwFillAttribute: 'uint32', dwFlags: 'uint32',
+          wShowWindow: 'uint16', cbReserved2: 'uint16',
+          lpReserved2: koffi.pointer('uint8'),
+          hStdInput: PVOID, hStdOutput: PVOID, hStdError: PVOID
+        })
+        return _shadowSI
+      }
+      koffi.bind = function (library, name, returnType, argTypes, options) {
+        const bound = origBind.call(this, library, name, returnType, argTypes, options)
+        if (name !== 'CreateProcessAsUserW' || typeof bound !== 'function') return bound
+        return function CreateProcessAsUserW_Hidden (...args) {
+          // lpStartupInfo is argument index 9 (0-based)
+          const siPtr = args[9]
+          if (siPtr != null) {
+            try {
+              const si = koffi.decode(siPtr, getShadowSI())
+              if (!(si.dwFlags & 0x40)) { // STARTF_USESHOWWINDOW not yet set
+                si.dwFlags |= 0x40        // add STARTF_USESHOWWINDOW
+                si.wShowWindow = 0         // SW_HIDE
+                koffi.encode(siPtr, getShadowSI(), si)
+              }
+            } catch (_) { /* best-effort: original call still proceeds */ }
+          }
+          return bound(...args)
+        }
+      }
+      return result
+    }
+  } catch (_) {}
+
+  // node-pty creates console processes via ConPTY/Win32 APIs, bypassing
+  // child_process entirely. Patch its spawn so terminal shells (pwsh, cmd)
+  // inherit a hidden console and don't flash a black window.
+  try {
+    const nodePty = require('node-pty')
+    if (nodePty && typeof nodePty.spawn === 'function') {
+      const origPtySpawn = nodePty.spawn.bind(nodePty)
+      nodePty.spawn = function (file, args, options) {
+        _log(`[node-pty.spawn] file=${file} args=${JSON.stringify(args).slice(0,200)}`)
+        const opts = Object.assign({}, options || {})
+        opts.env = Object.assign({}, process.env, opts.env || {})
+        // Force a hidden console on the ConPTY child: the parent allocates
+        // a visible console by default when spawned from a GUI/console app.
+        opts.env.CREATE_NO_WINDOW = '1'
+        return origPtySpawn(file, args, opts)
+      }
+    }
+  } catch {}
 
   // worker_threads create a fresh module registry, so the child_process patch
   // does NOT carry over; inject the shim into every Worker via execArgv.

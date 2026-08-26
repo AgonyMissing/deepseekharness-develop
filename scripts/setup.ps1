@@ -373,6 +373,27 @@ if (Test-Path $dpTarget) {
   Write-Warning "缺少文件: $dpTarget"
 }
 
+Write-Step '应用沙箱进程隐藏窗口补丁'
+$sandboxTarget = Join-Path $root 'resources\dsh\node_modules\@deepseek-ai\dsh-sandbox-windows-acl\lib\types-CNjZgO4h.js'
+if (Test-Path $sandboxTarget) {
+  $sbRaw = [IO.File]::ReadAllText($sandboxTarget)
+  if ($sbRaw.Contains('dwFlags: 256 | 0x40')) {
+    Write-Output "already patched: $sandboxTarget"
+  } else {
+    $sbNext = $sbRaw.Replace('dwFlags: 256,', 'dwFlags: 256 | 0x40,')
+    $sbNext = $sbNext.Replace("dwFlags: 256 | 0x40,`n`t`thStdInput: stdIn.read,", "dwFlags: 256 | 0x40,`n`t`twShowWindow: 0,`n`t`thStdInput: stdIn.read,")
+    $sbNext = $sbNext.Replace("dwFlags: 256 | 0x40,`n`t`thStdInput: stdIn,", "dwFlags: 256 | 0x40,`n`t`twShowWindow: 0,`n`t`thStdInput: stdIn,")
+    if ($sbNext -eq $sbRaw) {
+      Write-Warning "未能自动匹配沙箱补丁位置: $sandboxTarget（可能需要人工检查）"
+    } else {
+      [IO.File]::WriteAllText($sandboxTarget, $sbNext)
+      Write-Output "patched: $sandboxTarget"
+    }
+  }
+} else {
+  Write-Warning "缺少文件: $sandboxTarget"
+}
+
 Write-Step '应用工作区卫生规则（standard 预设）'
 function Update-WorkspaceHygiene {
   param([string]$Path)
