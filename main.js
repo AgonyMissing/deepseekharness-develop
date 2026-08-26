@@ -702,23 +702,27 @@ const BACKGROUND_CSS = `
 /* 记忆系统侧边栏图标与其他面板（任务看板/SSH/技能中心）统一：
    图标 18px、图标容器 24px、内边距 10px、图标与文字间距 8px，
    让四个入口的文字首字对齐。 */
-button[data-dsh-mnemon-entry] [class*="entryIcon"] svg {
-  width: 18px !important;
-  height: 18px !important;
-}
-button[data-dsh-mnemon-entry] {
-  padding-left: 10px !important;
-  gap: 8px !important;
-}
-button[data-dsh-mnemon-entry] [class*="entryIcon"] {
-  width: 24px !important;
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
 button[data-dsh-ssh-entry] {
   gap: 8px !important;
+}
+/* 侧边栏收起时：统一所有图标按钮的高度和间距，防止图标列错位 */
+body[data-dsh-sidebar-collapsed] [class*="nArs4W_panel"] button {
+  height: 36px !important;
+  min-height: 36px !important;
+  max-height: 36px !important;
+  width: 36px !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border-radius: 50% !important;
+}
+body[data-dsh-sidebar-collapsed] [class*="nArs4W_panel"] button svg,
+body[data-dsh-sidebar-collapsed] [class*="nArs4W_panel"] button [class*="icon"] svg {
+  width: 18px !important;
+  height: 18px !important;
+  flex: none !important;
 }
 html:not([data-dsh-skin]) {
   background-color: #ffffff;
@@ -3653,6 +3657,33 @@ async function injectBackgroundWhenReady(win) {
     })`)
     await Promise.all([
       win.webContents.insertCSS(BACKGROUND_CSS),
+      // 记忆系统按钮样式修正：展开左对齐、收起居中
+      win.webContents.executeJavaScript(`(() => {
+        function fixMnemon() {
+          var btn = document.querySelector('button[data-dsh-mnemon-entry]')
+          if (!btn) return false
+          var collapsed = document.body.hasAttribute('data-dsh-sidebar-collapsed')
+          if (collapsed) {
+            btn.style.justifyContent = 'center'
+            btn.style.paddingLeft = '0'
+            btn.style.paddingRight = '0'
+            var icon = btn.querySelector('[class*="entryIcon"]')
+            if (icon) { icon.style.justifyContent = 'center' }
+          } else {
+            btn.style.justifyContent = 'flex-start'
+            btn.style.paddingLeft = '10px'
+            btn.style.paddingRight = '10px'
+            var icon = btn.querySelector('[class*="entryIcon"]')
+            if (icon) { icon.style.justifyContent = 'flex-start' }
+          }
+          return true
+        }
+        var tries = 0
+        var timer = setInterval(function() {
+          if (fixMnemon() || ++tries > 50) clearInterval(timer)
+        }, 200)
+        new MutationObserver(function() { fixMnemon() }).observe(document.body, { attributes: true, attributeFilter: ['data-dsh-sidebar-collapsed'] })
+      })`).catch(() => {}),
       win.webContents.executeJavaScript(THEME_GUARD).catch(() => {}),
       win.webContents.executeJavaScript(`(() => {
         var WALLPAPERS = ['whale', 'blue-fantasy', 'harbor', 'dragon', 'miku', 'summer', 'whale-mom', 'maid']
