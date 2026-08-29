@@ -262,6 +262,161 @@ const WEBUI_FAMILY_ROWS = [
 ]
 
 /**
+ * Harness-extras client plugin (MCP servers / skills / subagents settings
+ * sections). Bundled under the kernel's node_modules; synced into the
+ * profile module root so the cordis loader resolves it on every machine —
+ * the package sits outside the kernel's own dependency graph, so the
+ * module-fallback heal cannot discover it on its own.
+ */
+const HARNESS_EXTRAS_NAME = '@deepseek-ai/dsh-client-ui-harness-extras'
+const HARNESS_EXTRAS_SRC = path.join(__dirname, 'resources', 'dsh', 'node_modules', HARNESS_EXTRAS_NAME)
+const HARNESS_EXTRAS_DST = path.join(DSH_HOME, 'profiles', 'node_modules', HARNESS_EXTRAS_NAME)
+
+/** Sync the bundled harness-extras package into the profile (version-aware). */
+function ensureHarnessExtras() {
+  if (!fs.existsSync(HARNESS_EXTRAS_SRC)) return
+  let bundledVersion = ''
+  try {
+    bundledVersion = JSON.parse(fs.readFileSync(path.join(HARNESS_EXTRAS_SRC, 'package.json'), 'utf8')).version ?? ''
+  } catch { /* treated as empty — always refresh */ }
+  let installedVersion = ''
+  try {
+    installedVersion = JSON.parse(fs.readFileSync(path.join(HARNESS_EXTRAS_DST, 'package.json'), 'utf8')).version ?? ''
+  } catch { /* missing install — copy below */ }
+  if (bundledVersion !== '' && bundledVersion === installedVersion) return
+  fs.rmSync(HARNESS_EXTRAS_DST, { recursive: true, force: true })
+  copyDirSync(HARNESS_EXTRAS_SRC, HARNESS_EXTRAS_DST)
+}
+
+/**
+ * Legacy-upgrade cleanup: machines that ran an older desktop build may still
+ * carry the removed third-party web-ui plugins (their packages in the
+ * profile node_modules and their rows in the profile patch). Loading those
+ * rows against the 0.1.2 kernel fails the boot, so every launch removes the
+ * known-legacy packages and rewrites the managed patch layers before the
+ * server starts. User data — sessions, skills, mcp-servers.json, settings,
+ * custom subagents — is never touched.
+ */
+const LEGACY_SCOPES = ['@linxin666', '@mlgbnb']
+const LEGACY_NAMES = new Set([
+  'dsh-better-sidebar',
+  '@deepseek-ai/dsh-client-ui-aqua',
+  '@deepseek-ai/dsh-host-apiproxy',
+  'dsh-history-tree',
+])
+
+/** Whether a package name belongs to a removed third-party plugin family. */
+function isLegacyPackage(name) {
+  if (LEGACY_NAMES.has(name)) return true
+  if (name.startsWith('@')) {
+    return LEGACY_SCOPES.includes(name.split('/')[0])
+  }
+  return false
+}
+
+/** Remove legacy plugin packages from one node_modules root. */
+function removeLegacyPackages(nodeModulesRoot) {
+  if (!fs.existsSync(nodeModulesRoot)) return
+  for (const entry of fs.readdirSync(nodeModulesRoot)) {
+    const entryPath = path.join(nodeModulesRoot, entry)
+    let stat
+    try {
+      stat = fs.statSync(entryPath)
+    } catch {
+      continue
+    }
+    if (!stat.isDirectory()) continue
+    if (entry.startsWith('@')) {
+      for (const inner of fs.readdirSync(entryPath)) {
+        if (isLegacyPackage(entry + '/' + inner)) {
+          fs.rmSync(path.join(entryPath, inner), { recursive: true, force: true })
+        }
+      }
+    } else if (isLegacyPackage(entry)) {
+      fs.rmSync(entryPath, { recursive: true, force: true })
+    }
+  }
+}
+
+/**
+ * Strip legacy plugin rows from one cordis patch layer: drop the desktop
+ * shell's old managed marker blocks wholesale, then remove any remaining
+ * id/name row pair that references a legacy package. Empty `- insert:`
+ * headers left behind are dropped too.
+ */
+function stripLegacyPatchRows(patchPath) {
+  if (!fs.existsSync(patchPath)) return
+  const lines = fs.readFileSync(patchPath, 'utf8').split(/\r?\n/)
+  const kept = []
+  let inMarkerBlock = false
+  for (const line of lines) {
+    if (/^# >>> dsh-desktop managed/.test(line)) { inMarkerBlock = true; continue }
+    if (/^# <<< dsh-desktop managed/.test(line)) { inMarkerBlock = false; continue }
+    if (inMarkerBlock) continue
+    kept.push(line)
+  }
+  // Remove id lines whose following name line references a legacy package.
+  const result = []
+  for (let i = 0; i < kept.length; i++) {
+    const line = kept[i]
+    const nameMatch = /^\s*name:\s*["']?([^"'\s]+)["']?\s*$/.exec(line)
+    if (nameMatch !== null && isLegacyPackage(nameMatch[1])) {
+      const previous = result.length > 0 ? result[result.length - 1] : ''
+      if (/^\s*-\s+id:/.test(previous)) result.pop()
+      continue
+    }
+    result.push(line)
+  }
+  // Drop `- insert:` headers whose block no longer carries any item.
+  const final = []
+  for (let i = 0; i < result.length; i++) {
+    const line = result[i]
+    if (/^\s*-\s+insert:\s*$/.test(line)) {
+      let next = ''
+      for (let j = i + 1; j < result.length; j++) {
+        if (result[j].trim() === '') continue
+        next = result[j]
+        break
+      }
+      if (!/^\s*-\s+id:/.test(next)) continue
+    }
+    final.push(line)
+  }
+  const next = final.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd() + '\n'
+  if (next !== lines.join('\n')) {
+    fs.writeFileSync(patchPath, next, 'utf8')
+  }
+}
+
+/** Drop legacy bundle references from one profile package.json. */
+function stripLegacyProfileBundles(profilePackagePath) {
+  if (!fs.existsSync(profilePackagePath)) return
+  try {
+    const manifest = JSON.parse(fs.readFileSync(profilePackagePath, 'utf8'))
+    const bundles = manifest?.dsh?.profile?.bundles
+    if (Array.isArray(bundles)) {
+      const filtered = bundles.filter(bundle => !isLegacyPackage(bundle))
+      if (filtered.length !== bundles.length) manifest.dsh.profile.bundles = filtered
+    }
+    if (manifest.dependencies !== undefined && typeof manifest.dependencies === 'object') {
+      for (const name of Object.keys(manifest.dependencies)) {
+        if (isLegacyPackage(name)) delete manifest.dependencies[name]
+      }
+    }
+    fs.writeFileSync(profilePackagePath, JSON.stringify(manifest, null, 2) + '\n', 'utf8')
+  } catch { /* a malformed manifest is the boot's own error to report */ }
+}
+
+/** Run the full legacy cleanup across the profile tree. */
+function cleanupLegacyPlugins() {
+  const profilesRoot = path.join(DSH_HOME, 'profiles')
+  removeLegacyPackages(path.join(profilesRoot, 'node_modules'))
+  removeLegacyPackages(path.join(profilesRoot, 'web', 'node_modules'))
+  stripLegacyPatchRows(path.join(profilesRoot, 'web', 'cordis.patch.yml'))
+  stripLegacyProfileBundles(path.join(profilesRoot, 'web', 'package.json'))
+}
+
+/**
  * Copy the bundled dsh-web-ui family modules into the profile module
  * fallback root. Only missing packages are copied, so existing installs are
  * never overwritten; on a fresh machine this is a one-time bootstrap.
@@ -515,6 +670,756 @@ function scanSkills() {
   return skills
 }
 
+/**
+ * Candidate skills available for install: one level deep from Codex's and
+ * the shared agents skill roots, excluding already-installed names.
+ */
+function scanSkillCandidates() {
+  const roots = [
+    { path: path.join(os.homedir(), '.codex', 'skills'), source: 'codex' },
+    { path: path.join(os.homedir(), '.agents', 'skills'), source: 'agents' },
+  ]
+  const installed = new Set(scanSkills().map(skill => skill.name))
+  const candidates = []
+  const seen = new Set()
+  for (const root of roots) {
+    let entries = []
+    try {
+      entries = fs.readdirSync(root.path, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    for (const entry of entries) {
+      if (entry.name.startsWith('.') || !entry.isDirectory()) continue
+      const skillPath = path.join(root.path, entry.name, 'SKILL.md')
+      if (!fs.existsSync(skillPath)) continue
+      let meta = {}
+      try {
+        meta = parseSkillFrontmatter(fs.readFileSync(skillPath, 'utf8'))
+      } catch {
+        continue
+      }
+      const name = meta.name || entry.name
+      if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(name) || seen.has(name)) continue
+      seen.add(name)
+      candidates.push({
+        name,
+        description: meta.description || '',
+        source: root.source,
+        path: path.join(root.path, entry.name),
+        installed: installed.has(name),
+      })
+    }
+  }
+  candidates.sort((a, b) => a.name.localeCompare(b.name))
+  return candidates
+}
+
+/** Copy one local skill directory into the app-managed dsh-home/skills root. */
+function installSkill(sourcePath) {
+  if (typeof sourcePath !== 'string' || sourcePath === '') return { error: '缺少技能路径' }
+  const resolved = path.resolve(sourcePath)
+  const skillFile = path.join(resolved, 'SKILL.md')
+  if (!fs.existsSync(skillFile)) return { error: '该目录下没有 SKILL.md' }
+  let meta = {}
+  try {
+    meta = parseSkillFrontmatter(fs.readFileSync(skillFile, 'utf8'))
+  } catch { /* name falls back to the directory name */ }
+  const name = meta.name || path.basename(resolved)
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(name)) return { error: '技能名称不合法' }
+  const root = path.resolve(path.join(DSH_HOME, 'skills'))
+  const target = path.join(root, name)
+  if (target !== root && !target.startsWith(root + path.sep)) return { error: '路径越界' }
+  fs.rmSync(target, { recursive: true, force: true })
+  fs.mkdirSync(root, { recursive: true })
+  fs.cpSync(resolved, target, { recursive: true })
+  return { ok: true, name }
+}
+
+/** Remove one managed skill from dsh-home/skills (path-scoped on purpose). */
+function removeSkill(name) {
+  if (typeof name !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(name)) return { error: '名称不合法' }
+  const root = path.resolve(path.join(DSH_HOME, 'skills'))
+  const target = path.resolve(path.join(root, name))
+  if (target === root || !target.startsWith(root + path.sep)) return { error: '路径越界' }
+  if (!fs.existsSync(target)) return { error: '未找到该技能' }
+  fs.rmSync(target, { recursive: true, force: true })
+  return { ok: true }
+}
+
+/** Validate + persist one server (add or replace by name). */
+function upsertMcpServer(input) {
+  if (input === null || typeof input !== 'object' || typeof input.name !== 'string') {
+    return { error: '缺少服务器名称' }
+  }
+  const name = input.name.trim()
+  if (!/^[A-Za-z0-9_-]{1,32}$/.test(name)) {
+    return { error: '名称需为 1-32 位字母、数字、下划线或连字符' }
+  }
+  const transport = input.transport === 'streamable-http' ? 'streamable-http'
+    : input.transport === 'stdio' ? 'stdio' : null
+  if (transport === null) return { error: '传输类型需为 stdio 或 streamable-http' }
+  const server = { name, transport, enabled: input.enabled !== false }
+  if (transport === 'stdio') {
+    if (typeof input.command !== 'string' || input.command.trim() === '') {
+      return { error: 'stdio 类型需要填写启动命令' }
+    }
+    server.command = input.command.trim()
+    server.args = Array.isArray(input.args) ? input.args.map(arg => String(arg)) : []
+    server.env = input.env && typeof input.env === 'object' ? input.env : {}
+    if (typeof input.cwd === 'string' && input.cwd.trim() !== '') {
+      server.cwd = input.cwd.trim()
+    }
+  } else {
+    if (typeof input.url !== 'string' || !/^https?:\/\//i.test(input.url.trim())) {
+      return { error: '需要填写 http(s):// 开头的服务器地址' }
+    }
+    server.url = input.url.trim()
+    server.headers = input.headers && typeof input.headers === 'object' ? input.headers : {}
+  }
+  if (Number.isFinite(input.toolCallTimeoutMs) && input.toolCallTimeoutMs > 0) {
+    server.toolCallTimeoutMs = Math.round(input.toolCallTimeoutMs)
+  }
+  const servers = readMcpServers().filter(existing => existing.name !== name)
+  servers.push(server)
+  writeMcpServers(servers)
+  return { ok: true }
+}
+
+/** Remove one server by name. */
+function removeMcpServer(name) {
+  if (typeof name !== 'string' || name === '') return { error: '缺少服务器名称' }
+  const before = readMcpServers()
+  const after = before.filter(existing => existing.name !== name)
+  if (after.length === before.length) return { error: '未找到该服务器' }
+  writeMcpServers(after)
+  return { ok: true }
+}
+
+/**
+ * User-level preset root: the roster's last-resort roots entry. A custom
+ * subagent here is a directory with agent.cordis.yml, discovered by the dsh
+ * preset roster on its own.
+ */
+function userPresetsDir() {
+  return path.join(DSH_HOME, '.agent-presets')
+}
+
+/**
+ * List the subagent delegation rows across the shipped presets plus the
+ * user-level .agent-presets root. Each row carries which preset declared it
+ * and whether it is disabled (the roster's tool-rows setting).
+ */
+function scanSubagents() {
+  const presetsDir = path.join(
+    __dirname, 'resources', 'dsh', 'node_modules', '@deepseek-ai', 'dsh-agent-presets', 'presets',
+  )
+  const rows = []
+  const roots = [presetsDir, userPresetsDir()]
+  for (const root of roots) {
+    let entries = []
+    try {
+      entries = fs.readdirSync(root, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name.startsWith('.')) continue
+      const presetFile = path.join(root, entry.name, 'agent.cordis.yml')
+      let raw = ''
+      try {
+        raw = fs.readFileSync(presetFile, 'utf8')
+      } catch {
+        continue
+      }
+      // Pull the delegation tool rows: id / provider / toolName / disabled per row.
+      const rowRe = /- id:\s*(tool-subagent-[\w-]+)([\s\S]*?)(?=- id:|\n\S|$)/g
+      let match
+      while ((match = rowRe.exec(raw)) !== null) {
+        const body = match[2]
+        const provider = /provider:\s*(\S+)/.exec(body)?.[1] ?? ''
+        const toolName = /toolName:\s*(\S+)/.exec(body)?.[1] ?? ''
+        const disabled = /disabled:\s*true/.test(body)
+        rows.push({
+          id: match[1],
+          preset: entry.name,
+          root: root === presetsDir ? 'shipped' : 'user',
+          provider,
+          toolName,
+          enabled: !disabled,
+        })
+      }
+    }
+  }
+  return rows
+}
+
+/** Escape one YAML string scalar (JSON strings are valid YAML). */
+function yamlStr(value) {
+  return JSON.stringify(value)
+}
+
+/**
+ * Create (or overwrite) a user-level subagent preset: a directory under
+ * ~/.dsh/.agent-presets/<name>/agent.cordis.yml declaring one enabled
+ * tool-subagent row plus a persona, so the roster discovers it on restart.
+ */
+function writeSubagentPreset(input, force) {
+  if (input === null || typeof input !== 'object') return { error: '缺少参数' }
+  const name = typeof input.name === 'string' ? input.name.trim() : ''
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$/.test(name)) {
+    return { error: '名称需为以字母数字开头，最多 32 位字母、数字、下划线或连字符' }
+  }
+  const root = path.resolve(userPresetsDir())
+  const dir = path.resolve(path.join(root, name))
+  if (!dir.startsWith(root + path.sep)) return { error: '路径越界' }
+  if (fs.existsSync(dir) && !force) return { error: '该子智能体已存在' }
+  const provider = input.provider === 'codex' || input.provider === 'claude-code' ? input.provider : 'codex'
+  const toolName = input.toolName && /^[A-Za-z0-9_-]+$/.test(input.toolName)
+    ? input.toolName : 'subagent_' + name
+  const persona = typeof input.persona === 'string' && input.persona.trim() !== ''
+    ? input.persona.trim() : 'You are a focused subagent.'
+  const id = 'tool-subagent-' + name
+  const lines = [
+    '# User subagent preset — managed by the DeepSeek Harness desktop shell.',
+    '- id: persona',
+    '  name: \'@deepseek-ai/dsh-persona\'',
+    '  config:',
+    '    text: >-',
+    '      ' + persona,
+    '',
+    '- id: ' + id,
+    '  name: \'@deepseek-ai/dsh-tool-subagent\'',
+    '  config:',
+    '    provider: ' + provider,
+    '    toolName: ' + toolName,
+    '    backgroundMode: one-shot',
+    '    maxDepth: provider-managed',
+    '',
+  ]
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(path.join(dir, 'agent.cordis.yml'), lines.join('\n'), 'utf8')
+  return { ok: true }
+}
+
+/** Toggle `disabled:` on one user preset's tool-subagent row; restart to apply. */
+function setSubagentEnabled(id, enabled) {
+  if (typeof id !== 'string' || id === '') return { error: '缺少标识' }
+  const root = path.resolve(userPresetsDir())
+  const name = id.replace(/^tool-subagent-/, '')
+  const dir = path.resolve(path.join(root, name))
+  if (!dir.startsWith(root + path.sep)) return { error: '路径越界' }
+  const presetFile = path.join(dir, 'agent.cordis.yml')
+  if (!fs.existsSync(presetFile)) return { error: '未找到该子智能体' }
+  let raw = fs.readFileSync(presetFile, 'utf8')
+  const rowRe = /(- id:\s*tool-subagent-[\w-]+[\s\S]*?)(?=- id:|\n\S|$)/g
+  let match
+  let changed = false
+  const next = raw.replace(rowRe, (whole, head) => {
+    if (!head.includes(id)) return whole
+    changed = true
+    return head.replace(/\r?\n\s*disabled:\s*true/, '')
+      .replace(/\r?\n\s*config:/, '\n      ' + (enabled ? '' : 'disabled: true\n') + '      config:')
+  })
+  if (!changed) return { error: '未找到匹配的行' }
+  fs.writeFileSync(presetFile, next, 'utf8')
+  return { ok: true }
+}
+
+/** Delete one user-level subagent preset directory. */
+function removeSubagentPreset(id) {
+  if (typeof id !== 'string' || id === '') return { error: '缺少标识' }
+  const root = path.resolve(userPresetsDir())
+  const name = id.replace(/^tool-subagent-/, '')
+  const dir = path.resolve(path.join(root, name))
+  if (!dir.startsWith(root + path.sep)) return { error: '路径越界' }
+  if (!fs.existsSync(dir)) return { error: '未找到该子智能体' }
+  fs.rmSync(dir, { recursive: true, force: true })
+  return { ok: true }
+}
+
+// ── Commands (slash prompt templates riding the skill pipeline) ─────────────
+
+/** Built-in kernel commands surfaced read-only in the Commands page. */
+const BUILTIN_COMMANDS = [
+  { name: 'compact', description: '压缩当前会话上下文', source: '内置' },
+  { name: 'goal', description: '设定或查看当前会话目标', source: '内置' },
+  { name: 'review', description: '复查最近的改动', source: '内置' },
+]
+
+/** User commands live in the skill root — a command IS a skill in this harness. */
+function skillsRootDir() {
+  return path.join(DSH_HOME, 'skills')
+}
+
+/** Create one command (a prompt-template skill) from name + template body. */
+function createCommand(input) {
+  if (input === null || typeof input !== 'object') return { error: '缺少参数' }
+  const name = typeof input.name === 'string' ? input.name.trim() : ''
+  if (!/^[a-z0-9][a-z0-9_-]{0,47}$/.test(name)) {
+    return { error: '名称需为小写字母/数字开头，最多 48 位小写字母、数字、下划线或连字符' }
+  }
+  const description = typeof input.description === 'string' ? input.description.trim() : ''
+  const template = typeof input.template === 'string' ? input.template : ''
+  if (template.trim() === '') return { error: '命令模板不能为空' }
+  const dir = path.join(skillsRootDir(), name)
+  if (fs.existsSync(dir)) return { error: '该命令已存在' }
+  fs.mkdirSync(dir, { recursive: true })
+  const frontmatter = ['---', `name: ${name}`, description !== '' ? `description: ${description}` : null, '---', '', template.trim(), '']
+    .filter(line => line !== null)
+    .join('\n')
+  fs.writeFileSync(path.join(dir, 'SKILL.md'), frontmatter, 'utf8')
+  return { ok: true, name }
+}
+
+/** Delete one user command (a skill directory; path-scoped). */
+function removeCommand(name) {
+  return removeSkill(name)
+}
+
+// ── Hooks (ZCode-compatible hooks.json driven by dsh-hooks-claude-code) ─────
+
+const HOOKS_EVENTS = ['PreToolUse', 'PostToolUse', 'SessionStart', 'SessionEnd', 'UserPromptSubmit', 'Stop']
+
+function hooksFilePath() {
+  return path.join(DSH_HOME, 'hooks.json')
+}
+
+function readHooksFile() {
+  try {
+    const data = JSON.parse(fs.readFileSync(hooksFilePath(), 'utf8'))
+    return data && typeof data === 'object' && data.hooks && typeof data.hooks === 'object' ? data : { hooks: {} }
+  } catch {
+    return { hooks: {} }
+  }
+}
+
+/** Flatten the nested hooks.json into row form for the settings page. */
+function scanHooks() {
+  const data = readHooksFile()
+  const rows = []
+  for (const event of Object.keys(data.hooks)) {
+    const groups = Array.isArray(data.hooks[event]) ? data.hooks[event] : []
+    groups.forEach((group, groupIndex) => {
+      const hooks = Array.isArray(group?.hooks) ? group.hooks : []
+      hooks.forEach((hook, hookIndex) => {
+        rows.push({
+          id: `${event}#${groupIndex}#${hookIndex}`,
+          event,
+          matcher: typeof group.matcher === 'string' ? group.matcher : '',
+          command: typeof hook.command === 'string' ? hook.command : '',
+          timeout: typeof hook.timeout === 'number' ? hook.timeout : undefined,
+          disabled: hook.disabled === true,
+        })
+      })
+    })
+  }
+  return rows
+}
+
+/** Append one hook entry (event/matcher/command/timeout). */
+function addHook(input) {
+  if (input === null || typeof input !== 'object') return { error: '缺少参数' }
+  const event = typeof input.event === 'string' ? input.event : ''
+  if (!HOOKS_EVENTS.includes(event)) return { error: '事件需为：' + HOOKS_EVENTS.join(', ') }
+  const command = typeof input.command === 'string' ? input.command.trim() : ''
+  if (command === '') return { error: '命令不能为空' }
+  const data = readHooksFile()
+  if (!Array.isArray(data.hooks[event])) data.hooks[event] = []
+  const entry = { matcher: typeof input.matcher === 'string' ? input.matcher : '', hooks: [{ type: 'command', command }] }
+  if (Number.isFinite(input.timeout) && input.timeout > 0) entry.hooks[0].timeout = Math.round(input.timeout)
+  data.hooks[event].push(entry)
+  fs.writeFileSync(hooksFilePath(), JSON.stringify(data, null, 2), 'utf8')
+  syncHooksPatch()
+  return { ok: true }
+}
+
+/** Toggle one hook entry's disabled flag. */
+function setHookEnabled(id, enabled) {
+  const match = /^(.+)#(\d+)#(\d+)$/.exec(typeof id === 'string' ? id : '')
+  if (match === null) return { error: '标识不合法' }
+  const data = readHooksFile()
+  const group = (data.hooks[match[1]] ?? [])[Number(match[2])]
+  const hook = group?.hooks?.[Number(match[3])]
+  if (hook === undefined) return { error: '未找到该钩子' }
+  if (enabled) delete hook.disabled
+  else hook.disabled = true
+  fs.writeFileSync(hooksFilePath(), JSON.stringify(data, null, 2), 'utf8')
+  return { ok: true }
+}
+
+/** Remove one hook entry by id. */
+function removeHook(id) {
+  const match = /^(.+)#(\d+)#(\d+)$/.exec(typeof id === 'string' ? id : '')
+  if (match === null) return { error: '标识不合法' }
+  const data = readHooksFile()
+  const groups = data.hooks[match[1]]
+  const group = groups?.[Number(match[2])]
+  const hooks = group?.hooks
+  if (!Array.isArray(hooks) || hooks[Number(match[3])] === undefined) return { error: '未找到该钩子' }
+  hooks.splice(Number(match[3]), 1)
+  if (hooks.length === 0) groups.splice(Number(match[2]), 1)
+  if (groups.length === 0) delete data.hooks[match[1]]
+  fs.writeFileSync(hooksFilePath(), JSON.stringify(data, null, 2), 'utf8')
+  syncHooksPatch()
+  return { ok: true }
+}
+
+/**
+ * Keep the profile patch row for dsh-hooks-claude-code in step with the
+ * hooks file: the row exists only while hooks.json does, so the kernel's
+ * hook bridge loads exactly when the user has hooks configured.
+ */
+function syncHooksPatch() {
+  const webPatch = path.join(DSH_HOME, 'profiles', 'web', 'cordis.patch.yml')
+  try {
+    fs.mkdirSync(path.dirname(webPatch), { recursive: true })
+    let existing = ''
+    try { existing = fs.readFileSync(webPatch, 'utf8') } catch { /* first write */ }
+    const rowBlock = [
+      '- id: hooks-claude-code',
+      '  name: \'@deepseek-ai/dsh-hooks-claude-code\'',
+      '  config:',
+      `    configPath: ${yamlValue(hooksFilePath())}`,
+    ].join('\n')
+    const marker = '# desktop-shell hooks bridge (managed)'
+    const without = existing
+      .replace(new RegExp(marker + '\\n[\\s\\S]*?(?=\\n[^ \\t#-]|\\n$|$)'), '')
+      .replace(marker + '\n', '')
+      .trimEnd()
+    const hasHooks = fs.existsSync(hooksFilePath())
+    const next = hasHooks ? (without === '' ? rowBlock : without + '\n\n' + rowBlock) : without
+    if (next !== existing) fs.writeFileSync(webPatch, next.endsWith('\n') || next === '' ? next : next + '\n', 'utf8')
+  } catch { /* patch layer is optional */ }
+}
+
+// ── Git panel (read-only projection over one working tree) ──────────────────
+
+const { execFile } = require('node:child_process')
+
+/** Run one git command in dir; resolves { stdout } or rejects with stderr. */
+function gitRun(dir, args) {
+  return new Promise((resolve, reject) => {
+    execFile('git', args, { cwd: dir, timeout: 10000, maxBuffer: 1024 * 1024, windowsHide: true }, (error, stdout, stderr) => {
+      if (error !== null) {
+        reject(new Error(String(stderr || error.message).trim()))
+        return
+      }
+      resolve({ stdout })
+    })
+  })
+}
+
+/** Project one working tree's branch, short status, and recent log. */
+async function scanGit(dir) {
+  const resolved = path.resolve(typeof dir === 'string' && dir.trim() !== '' ? dir.trim() : DSH_HOME)
+  if (!fs.existsSync(resolved)) return { error: '目录不存在' }
+  try {
+    const [branch, status, log, branches] = await Promise.all([
+      gitRun(resolved, ['rev-parse', '--abbrev-ref', 'HEAD']).catch(() => ({ stdout: '' })),
+      gitRun(resolved, ['status', '--porcelain']).catch(() => ({ stdout: '' })),
+      gitRun(resolved, ['log', '--oneline', '-10']).catch(() => ({ stdout: '' })),
+      gitRun(resolved, ['branch', '--list']).catch(() => ({ stdout: '' })),
+    ])
+    if (branch.stdout.trim() === '') return { error: '该目录不是 git 仓库' }
+    const statusLines = status.stdout.split('\n').filter(line => line.trim() !== '')
+    return {
+      path: resolved,
+      branch: branch.stdout.trim(),
+      changes: statusLines.map(line => ({
+        code: line.slice(0, 2).trim(),
+        file: line.slice(3).trim(),
+        staged: line[0] !== ' ' && line[0] !== '?',
+      })),
+      log: log.stdout.split('\n').filter(line => line.trim() !== ''),
+      branches: branches.stdout.split('\n').map(line => line.trim().replace(/^\* /, '')).filter(line => line !== ''),
+    }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+/**
+ * Workspaces known to the harness: one entry per distinct session cwd,
+ * parsed from each session log's header line. This backs the Git page's
+ * workspace selector — no path typing required.
+ */
+function scanWorkspaces() {
+  const sessionsRoot = path.join(DSH_HOME, 'sessions')
+  const byPath = new Map()
+  let entries = []
+  try {
+    entries = fs.readdirSync(sessionsRoot, { withFileTypes: true })
+  } catch {
+    return []
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    let subs = []
+    try {
+      subs = fs.readdirSync(path.join(sessionsRoot, entry.name), { withFileTypes: true })
+    } catch {
+      continue
+    }
+    for (const sub of subs) {
+      if (!sub.isDirectory()) continue
+      const logFile = path.join(sessionsRoot, entry.name, sub.name, 'session.jsonl')
+      let first = ''
+      try {
+        const fd = fs.openSync(logFile, 'r')
+        const buffer = Buffer.alloc(4096)
+        const read = fs.readSync(fd, buffer, 0, 4096, 0)
+        fs.closeSync(fd)
+        first = buffer.toString('utf8', 0, read).split('\n')[0]
+      } catch {
+        continue
+      }
+      let header
+      try {
+        header = JSON.parse(first)
+      } catch {
+        continue
+      }
+      if (typeof header.cwd !== 'string' || header.cwd === '') continue
+      const existing = byPath.get(header.cwd)
+      const createdAt = typeof header.createdAt === 'string' ? header.createdAt : ''
+      if (existing === undefined) {
+        byPath.set(header.cwd, { path: header.cwd, name: path.basename(header.cwd) || header.cwd, sessions: 1, lastActive: createdAt })
+      } else {
+        existing.sessions += 1
+        if (createdAt > existing.lastActive) existing.lastActive = createdAt
+      }
+    }
+  }
+  // Active workspaces only: archived/idle session roots stay out of the Git
+  // page's selector (they are managed on the Archive page instead).
+  const cutoff = Date.now() - 14 * 24 * 60 * 60 * 1000
+  return [...byPath.values()]
+    .filter(row => row.lastActive === '' || Date.parse(row.lastActive) > cutoff)
+    .sort((a, b) => b.lastActive.localeCompare(a.lastActive))
+    .slice(0, 20)
+}
+
+// ── Session archive (move idle session logs out of the live root) ──────
+
+const ARCHIVE_ROOT = path.join(DSH_HOME, 'sessions-archive')
+
+/** List every session under the live and archive roots for the Archive page. */
+function scanArchive() {
+  const rows = []
+  const roots = [
+    { root: path.join(DSH_HOME, 'sessions'), archived: false },
+    { root: ARCHIVE_ROOT, archived: true },
+  ]
+  for (const { root, archived } of roots) {
+    let groups = []
+    try {
+      groups = fs.readdirSync(root, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    for (const group of groups) {
+      if (!group.isDirectory() || group.name.startsWith('session-')) continue
+      const groupDir = path.join(root, group.name)
+      let subs = []
+      try {
+        subs = fs.readdirSync(groupDir, { withFileTypes: true })
+      } catch {
+        continue
+      }
+      for (const sub of subs) {
+        if (!sub.isDirectory()) continue
+        const subDir = path.join(groupDir, sub.name)
+        let size = 0
+        let mtime = 0
+        try {
+          for (const file of fs.readdirSync(subDir)) {
+            try { size += fs.statSync(path.join(subDir, file)).size } catch { /* skip */ }
+          }
+          mtime = fs.statSync(subDir).mtimeMs
+        } catch { /* skip */ }
+        rows.push({
+          group: group.name,
+          sessionId: sub.name,
+          size,
+          mtime,
+          archived,
+        })
+      }
+    }
+  }
+  rows.sort((a, b) => b.mtime - a.mtime)
+  return rows
+}
+
+/** Move one session between the live and archive roots (path-scoped). */
+function moveArchiveSession(group, sessionId, archive) {
+  if (typeof group !== 'string' || typeof sessionId !== 'string') return { error: '缺少参数' }
+  if (group.includes('..') || sessionId.includes('..')) return { error: '路径不合法' }
+  const liveRoot = path.resolve(path.join(DSH_HOME, 'sessions'))
+  const live = path.resolve(liveRoot, group, sessionId)
+  if (!live.startsWith(liveRoot + path.sep)) return { error: '路径越界' }
+  const archiveRoot = path.resolve(ARCHIVE_ROOT)
+  const archived = path.resolve(archiveRoot, group, sessionId)
+  if (!archived.startsWith(archiveRoot + path.sep)) return { error: '路径越界' }
+  const from = archive === true ? live : archived
+  const to = archive === true ? archived : live
+  if (!fs.existsSync(from)) return { error: '未找到该会话' }
+  try {
+    fs.mkdirSync(path.dirname(to), { recursive: true })
+    fs.renameSync(from, to)
+    return { ok: true }
+  } catch {
+    return { error: '移动失败，会话可能正在运行中' }
+  }
+}
+
+/** Permanently delete one archived-or-live session directory. */
+function deleteArchiveSession(group, sessionId) {
+  if (typeof group !== 'string' || typeof sessionId !== 'string') return { error: '缺少参数' }
+  if (group.includes('..') || sessionId.includes('..')) return { error: '路径不合法' }
+  const roots = [path.resolve(path.join(DSH_HOME, 'sessions')), path.resolve(ARCHIVE_ROOT)]
+  for (const root of roots) {
+    const target = path.resolve(root, group, sessionId)
+    if (target.startsWith(root + path.sep) && fs.existsSync(target)) {
+      try {
+        fs.rmSync(target, { recursive: true, force: true })
+        return { ok: true }
+      } catch {
+        return { error: '删除失败，会话可能正在运行中' }
+      }
+    }
+  }
+  return { error: '未找到该会话' }
+}
+
+/** Switch one working tree to another branch (creating it when asked). */
+async function gitCheckout(dir, branch, create) {
+  const resolved = path.resolve(typeof dir === 'string' ? dir : '')
+  if (!fs.existsSync(resolved)) return { error: '目录不存在' }
+  if (typeof branch !== 'string' || !/^[\w./-]+$/.test(branch)) return { error: '分支名不合法' }
+  try {
+    const args = create === true ? ['checkout', '-b', branch] : ['checkout', branch]
+    await gitRun(resolved, args)
+    return { ok: true }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+/** Pull the current branch (update project). */
+async function gitPull(dir) {
+  const resolved = path.resolve(typeof dir === 'string' ? dir : '')
+  try {
+    const { stdout } = await gitRun(resolved, ['pull', '--no-edit'])
+    return { ok: true, output: stdout.trim() }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+/** Push the current branch (publish project). */
+async function gitPush(dir) {
+  const resolved = path.resolve(typeof dir === 'string' ? dir : '')
+  try {
+    const head = await gitRun(resolved, ['rev-parse', '--abbrev-ref', 'HEAD'])
+    const branch = head.stdout.trim()
+    const { stdout } = await gitRun(resolved, ['push', '-u', 'origin', branch])
+    return { ok: true, output: stdout.trim() }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+/** Stage the named files and commit with the given message. */
+async function gitCommit(dir, files, message) {
+  const resolved = path.resolve(typeof dir === 'string' ? dir : '')
+  if (!Array.isArray(files) || files.length === 0) return { error: '未选择要提交的文件' }
+  if (typeof message !== 'string' || message.trim() === '') return { error: '提交信息不能为空' }
+  if (message.includes('\n')) return { error: '提交信息需为单行' }
+  try {
+    await gitRun(resolved, ['add', '--', ...files])
+    const { stdout } = await gitRun(resolved, ['commit', '-m', message.trim()])
+    return { ok: true, output: stdout.trim() }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+// ── File browser (sidebar file panel) ────────────────────────────────────────
+
+/** List one directory's entries with type and size. */
+function scanFiles(dir) {
+  const resolved = path.resolve(typeof dir === 'string' && dir.trim() !== '' ? dir.trim() : os.homedir())
+  if (!fs.existsSync(resolved)) return { error: '目录不存在' }
+  let stat
+  try { stat = fs.statSync(resolved) } catch { return { error: '无法读取该路径' } }
+  if (!stat.isDirectory()) return { error: '不是目录' }
+  let entries = []
+  try {
+    entries = fs.readdirSync(resolved, { withFileTypes: true })
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) }
+  }
+  const rows = []
+  for (const entry of entries) {
+    if (entry.name.startsWith('.')) continue
+    const full = path.join(resolved, entry.name)
+    let size = 0
+    try { size = entry.isDirectory() ? 0 : fs.statSync(full).size } catch { /* unreadable — size 0 */ }
+    rows.push({ name: entry.name, dir: entry.isDirectory(), size })
+  }
+  rows.sort((a, b) => (a.dir === b.dir ? a.name.localeCompare(b.name) : a.dir ? -1 : 1))
+  return { path: resolved, entries: rows.slice(0, 500) }
+}
+
+/** Read one text file's head for preview (bounded). */
+function readTextFileHead(filePath) {
+  const resolved = path.resolve(typeof filePath === 'string' ? filePath : '')
+  if (resolved === '' || !fs.existsSync(resolved)) return { error: '文件不存在' }
+  const stat = fs.statSync(resolved)
+  if (stat.isDirectory()) return { error: '是目录' }
+  if (stat.size > 512 * 1024) return { error: '文件过大，无法预览' }
+  try {
+    return { path: resolved, content: fs.readFileSync(resolved, 'utf8').slice(0, 200000) }
+  } catch {
+    return { error: '无法以文本读取' }
+  }
+}
+
+// ── Terminal (HTTP command panel; per-panel cwd kept server-side) ────────────
+
+const terminalSessions = new Map()
+let terminalSeq = 0
+
+/** Execute one command inside a panel's cwd; `cd` mutates the panel cwd. */
+function runTerminalCommand(panelId, command) {
+  const id = typeof panelId === 'string' && panelId !== '' ? panelId : 'panel-' + String(++terminalSeq)
+  let cwd = terminalSessions.get(id) ?? DSH_HOME
+  if (typeof command !== 'string' || command.trim() === '') {
+    return Promise.resolve({ panel: id, cwd, output: '' })
+  }
+  const trimmed = command.trim()
+  if (/^cd(\s|$)/.test(trimmed)) {
+    const target = trimmed.slice(2).trim() || DSH_HOME
+    const resolved = path.resolve(cwd, target.replace(/^"(.*)"$/, '$1'))
+    if (!fs.existsSync(resolved)) {
+      return Promise.resolve({ panel: id, cwd, output: '目录不存在: ' + resolved })
+    }
+    cwd = resolved
+    terminalSessions.set(id, cwd)
+    return Promise.resolve({ panel: id, cwd, output: '' })
+  }
+  return new Promise((resolve) => {
+    const isWin = process.platform === 'win32'
+    const shell = isWin ? 'cmd' : '/bin/sh'
+    const shellArgs = isWin ? ['/c', trimmed] : ['-c', trimmed]
+    execFile(shell, shellArgs, { cwd, timeout: 60000, maxBuffer: 1024 * 1024, windowsHide: true }, (error, stdout, stderr) => {
+      const output = [stdout, stderr, error !== null && error.killed === true ? '\n[超时或被终止]' : ''].join('').trimEnd()
+      resolve({ panel: id, cwd, output })
+    })
+  })
+}
 
 /**
  * Seed the per-user settings on first launch: pin the light theme and select
@@ -1895,6 +2800,11 @@ async function injectEffortSlider(win, wait = false) {
       check()
     })`)
     await win.webContents.insertCSS(EFFORT_SLIDER_CSS)
+    // Local list APIs (MCP servers / skills / subagents) for the built-in
+    // harness-extras settings sections.
+    await win.webContents.executeJavaScript(
+      `window.__DSH_MCP_API__ = ${JSON.stringify('http://127.0.0.1:' + dialogPort)}; true`,
+    ).catch(() => {})
     await win.webContents.executeJavaScript(EFFORT_SLIDER_JS)
     await win.webContents.executeJavaScript(TOOLTIP_FIX_JS).catch(() => {})
     if (wait) {
@@ -1948,6 +2858,305 @@ function startDialogServer() {
           sendJson(200, { path: value })
         } catch (error) {
           sendJson(500, { error: error instanceof Error ? error.message : String(error) })
+        }
+        return
+      }
+      if (url.pathname === '/mcp') {
+        if (req.method === 'GET') {
+          sendJson(200, { servers: readMcpServers() })
+          return
+        }
+        if (req.method === 'POST') {
+          try {
+            const chunks = []
+            for await (const chunk of req) chunks.push(chunk)
+            const body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+            const result = upsertMcpServer(body)
+            if (result.error !== undefined) {
+              sendJson(400, { error: result.error })
+              return
+            }
+            scheduleServerRestart()
+            sendJson(200, { ok: true, servers: readMcpServers() })
+          } catch (error) {
+            sendJson(400, { error: error instanceof Error ? error.message : String(error) })
+          }
+          return
+        }
+        if (req.method === 'DELETE') {
+          const result = removeMcpServer(url.searchParams.get('name'))
+          if (result.error !== undefined) {
+            sendJson(400, { error: result.error })
+            return
+          }
+          scheduleServerRestart()
+          sendJson(200, { ok: true, servers: readMcpServers() })
+          return
+        }
+        sendJson(405, { error: 'method not allowed' })
+        return
+      }
+      if (url.pathname === '/skills' && req.method === 'GET') {
+        sendJson(200, { skills: scanSkills() })
+        return
+      }
+      if (url.pathname === '/skill-candidates' && req.method === 'GET') {
+        sendJson(200, { skills: scanSkillCandidates() })
+        return
+      }
+      if (url.pathname === '/skills' && req.method === 'POST') {
+        try {
+          const chunks = []
+          for await (const chunk of req) chunks.push(chunk)
+          const body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+          const result = installSkill(body.sourcePath)
+          if (result.error !== undefined) {
+            sendJson(400, { error: result.error })
+            return
+          }
+          sendJson(200, { ok: true, skills: scanSkills() })
+        } catch (error) {
+          sendJson(400, { error: error instanceof Error ? error.message : String(error) })
+        }
+        return
+      }
+      if (url.pathname === '/skills' && req.method === 'DELETE') {
+        const result = removeSkill(url.searchParams.get('name'))
+        if (result.error !== undefined) {
+          sendJson(400, { error: result.error })
+          return
+        }
+        sendJson(200, { ok: true, skills: scanSkills() })
+        return
+      }
+      if (url.pathname === '/subagents' && req.method === 'GET') {
+        sendJson(200, { subagents: scanSubagents() })
+        return
+      }
+      if (url.pathname === '/subagents' && req.method === 'POST') {
+        try {
+          const chunks = []
+          for await (const chunk of req) chunks.push(chunk)
+          const body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+          const result = writeSubagentPreset(body, body.force === true)
+          if (result.error !== undefined) {
+            sendJson(400, { error: result.error })
+            return
+          }
+          scheduleServerRestart()
+          sendJson(200, { ok: true, subagents: scanSubagents() })
+        } catch (error) {
+          sendJson(400, { error: error instanceof Error ? error.message : String(error) })
+        }
+        return
+      }
+      if (url.pathname === '/subagents/set-enabled' && req.method === 'POST') {
+        try {
+          const chunks = []
+          for await (const chunk of req) chunks.push(chunk)
+          const body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+          const result = setSubagentEnabled(body.id, body.enabled !== false)
+          if (result.error !== undefined) {
+            sendJson(400, { error: result.error })
+            return
+          }
+          scheduleServerRestart()
+          sendJson(200, { ok: true, subagents: scanSubagents() })
+        } catch (error) {
+          sendJson(400, { error: error instanceof Error ? error.message : String(error) })
+        }
+        return
+      }
+      if (url.pathname === '/subagents' && req.method === 'DELETE') {
+        const result = removeSubagentPreset(url.searchParams.get('id'))
+        if (result.error !== undefined) {
+          sendJson(400, { error: result.error })
+          return
+        }
+        scheduleServerRestart()
+        sendJson(200, { ok: true, subagents: scanSubagents() })
+        return
+      }
+      if (url.pathname === '/commands' && req.method === 'GET') {
+        sendJson(200, { builtin: BUILTIN_COMMANDS, commands: scanSkills() })
+        return
+      }
+      if (url.pathname === '/commands' && req.method === 'POST') {
+        try {
+          const chunks = []
+          for await (const chunk of req) chunks.push(chunk)
+          const body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+          const result = createCommand(body)
+          if (result.error !== undefined) {
+            sendJson(400, { error: result.error })
+            return
+          }
+          sendJson(200, { ok: true })
+        } catch (error) {
+          sendJson(400, { error: error instanceof Error ? error.message : String(error) })
+        }
+        return
+      }
+      if (url.pathname === '/commands' && req.method === 'DELETE') {
+        const result = removeCommand(url.searchParams.get('name'))
+        if (result.error !== undefined) {
+          sendJson(400, { error: result.error })
+          return
+        }
+        sendJson(200, { ok: true })
+        return
+      }
+      if (url.pathname === '/hooks' && req.method === 'GET') {
+        sendJson(200, { hooks: scanHooks(), events: HOOKS_EVENTS })
+        return
+      }
+      if (url.pathname === '/hooks' && req.method === 'POST') {
+        try {
+          const chunks = []
+          for await (const chunk of req) chunks.push(chunk)
+          const body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+          const result = addHook(body)
+          if (result.error !== undefined) {
+            sendJson(400, { error: result.error })
+            return
+          }
+          scheduleServerRestart()
+          sendJson(200, { ok: true, hooks: scanHooks() })
+        } catch (error) {
+          sendJson(400, { error: error instanceof Error ? error.message : String(error) })
+        }
+        return
+      }
+      if (url.pathname === '/hooks/set-enabled' && req.method === 'POST') {
+        try {
+          const chunks = []
+          for await (const chunk of req) chunks.push(chunk)
+          const body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+          const result = setHookEnabled(body.id, body.enabled !== false)
+          if (result.error !== undefined) {
+            sendJson(400, { error: result.error })
+            return
+          }
+          scheduleServerRestart()
+          sendJson(200, { ok: true, hooks: scanHooks() })
+        } catch (error) {
+          sendJson(400, { error: error instanceof Error ? error.message : String(error) })
+        }
+        return
+      }
+      if (url.pathname === '/hooks' && req.method === 'DELETE') {
+        const result = removeHook(url.searchParams.get('id'))
+        if (result.error !== undefined) {
+          sendJson(400, { error: result.error })
+          return
+        }
+        scheduleServerRestart()
+        sendJson(200, { ok: true, hooks: scanHooks() })
+        return
+      }
+      if (url.pathname === '/git' && req.method === 'GET') {
+        scanGit(url.searchParams.get('path')).then(result => sendJson(200, result)).catch(() => sendJson(500, { error: 'git 执行失败' }))
+        return
+      }
+      if (url.pathname === '/workspaces' && req.method === 'GET') {
+        sendJson(200, { workspaces: scanWorkspaces() })
+        return
+      }
+      if (url.pathname === '/git/checkout' && req.method === 'POST') {
+        void (async () => {
+          try {
+            const chunks = []
+            for await (const chunk of req) chunks.push(chunk)
+            const body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+            const result = await gitCheckout(body.path, body.branch, body.create === true)
+            sendJson(result.error !== undefined ? 400 : 200, result)
+          } catch (error) {
+            sendJson(400, { error: error instanceof Error ? error.message : String(error) })
+          }
+        })()
+        return
+      }
+      if (url.pathname === '/git/pull' && req.method === 'POST') {
+        void (async () => {
+          try {
+            const chunks = []
+            for await (const chunk of req) chunks.push(chunk)
+            const body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+            const result = await gitPull(body.path)
+            sendJson(result.error !== undefined ? 400 : 200, result)
+          } catch (error) {
+            sendJson(400, { error: error instanceof Error ? error.message : String(error) })
+          }
+        })()
+        return
+      }
+      if (url.pathname === '/git/push' && req.method === 'POST') {
+        void (async () => {
+          try {
+            const chunks = []
+            for await (const chunk of req) chunks.push(chunk)
+            const body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+            const result = await gitPush(body.path)
+            sendJson(result.error !== undefined ? 400 : 200, result)
+          } catch (error) {
+            sendJson(400, { error: error instanceof Error ? error.message : String(error) })
+          }
+        })()
+        return
+      }
+      if (url.pathname === '/git/commit' && req.method === 'POST') {
+        void (async () => {
+          try {
+            const chunks = []
+            for await (const chunk of req) chunks.push(chunk)
+            const body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+            const result = await gitCommit(body.path, body.files, body.message)
+            sendJson(result.error !== undefined ? 400 : 200, result)
+          } catch (error) {
+            sendJson(400, { error: error instanceof Error ? error.message : String(error) })
+          }
+        })()
+        return
+      }
+      if (url.pathname === '/files' && req.method === 'GET') {
+        sendJson(200, scanFiles(url.searchParams.get('path')))
+        return
+      }
+      if (url.pathname === '/file-content' && req.method === 'GET') {
+        sendJson(200, readTextFileHead(url.searchParams.get('path')))
+        return
+      }
+      if (url.pathname === '/archive' && req.method === 'GET') {
+        sendJson(200, { sessions: scanArchive() })
+        return
+      }
+      if (url.pathname === '/archive/move' && req.method === 'POST') {
+        void (async () => {
+          try {
+            const chunks = []
+            for await (const chunk of req) chunks.push(chunk)
+            const body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+            const result = moveArchiveSession(body.group, body.sessionId, body.archive === true)
+            sendJson(result.error !== undefined ? 400 : 200, result)
+          } catch (error) {
+            sendJson(400, { error: error instanceof Error ? error.message : String(error) })
+          }
+        })()
+        return
+      }
+      if (url.pathname === '/archive' && req.method === 'DELETE') {
+        const result = deleteArchiveSession(url.searchParams.get('group'), url.searchParams.get('sessionId'))
+        sendJson(result.error !== undefined ? 400 : 200, result)
+        return
+      }
+      if (url.pathname === '/term' && req.method === 'POST') {
+        try {
+          const chunks = []
+          for await (const chunk of req) chunks.push(chunk)
+          const body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+          runTerminalCommand(body.panel, body.command).then(result => sendJson(200, result))
+        } catch (error) {
+          sendJson(400, { error: error instanceof Error ? error.message : String(error) })
         }
         return
       }
@@ -2302,8 +3511,10 @@ async function injectBackgroundWhenReady(win) {
         new MutationObserver(dedupTooltips).observe(document.body, { childList: true, subtree: true })
         dedupTooltips()
       })()`).catch(() => {}),
-      // ── Brand title + Session-log button reposition ──
+      // ── Brand title + Session-log button reposition + workspace git badge ──
       win.webContents.executeJavaScript(`(() => {
+        var branchCache = {}
+        var DSH_API = function () { return window.__DSH_MCP_API__ || '' }()
         function fixBrandAndLog() {
           // 1. Replace "DSH 本地构建" / "DSH Local Build" brand with DeepSeek Harness
           document.querySelectorAll('*').forEach(function(el) {
@@ -2323,8 +3534,72 @@ async function injectBackgroundWhenReady(win) {
             }
           })
         }
-        new MutationObserver(fixBrandAndLog).observe(document.body, { childList: true, subtree: true })
+        // 3. Workspace git badge: show the branch of the active session's
+        //    workspace next to its chip in the composer header.
+        var branchTimer = null
+        function fetchJson(url) {
+          return fetch(DSH_API() + url).then(function (r) { return r.json() })
+        }
+        function showBadge(anchor, text) {
+          if (anchor === null || anchor.parentElement === null) return
+          var badge = anchor.parentElement.querySelector('.dshx-branch-badge')
+          if (text === '') {
+            if (badge !== null) badge.remove()
+            return
+          }
+          if (badge === null) {
+            badge = document.createElement('span')
+            badge.className = 'dshx-branch-badge'
+            badge.style.cssText = 'display:inline-flex;align-items:center;gap:4px;margin-left:10px;padding:2px 10px;'
+              + 'font-size:12px;border-radius:999px;cursor:default;'
+              + 'border:1px solid var(--dsw-alias-border-l2,rgba(121,126,145,.3));'
+              + 'color:var(--dsw-alias-label-secondary,#686c75);'
+            anchor.parentElement.insertBefore(badge, anchor.nextSibling)
+          }
+          badge.textContent = '⎇ ' + text
+        }
+        function findWorkspaceChip() {
+          // The workspace chip is the button carrying the active workspace name
+          // in the composer header row (next to the preset chip).
+          var buttons = document.querySelectorAll('button')
+          for (var i = 0; i < buttons.length; i++) {
+            var b = buttons[i]
+            var rect = b.getBoundingClientRect()
+            if (rect.width === 0 || rect.top > 260 || rect.top < 0) continue
+            var text = b.textContent.trim()
+            if (text === '' || text.length > 60) continue
+            if (/^(对话|轨迹|新会话|设置|标准模式|跟随系统|Workspace)/.test(text)) continue
+            if (b.querySelector('svg') === null) continue
+            if (text.indexOf('⎇') !== -1) continue
+            return b
+          }
+          return null
+        }
+        function refreshBranchBadge() {
+          if (DSH_API() === '') return
+          var chip = findWorkspaceChip()
+          if (chip === null) return
+          var name = chip.textContent.trim()
+          var cached = branchCache[name]
+          if (cached !== undefined) { showBadge(chip, cached); return }
+          fetchJson('/workspaces').then(function (data) {
+            var row = (data.workspaces || []).find(function (w) { return w.name === name })
+            if (row === undefined) { branchCache[name] = ''; showBadge(chip, ''); return }
+            return fetchJson('/git?path=' + encodeURIComponent(row.path)).then(function (git) {
+              var branch = git && git.branch ? git.branch : ''
+              branchCache[name] = branch
+              showBadge(chip, branch)
+            })
+          }).catch(function () {})
+        }
+        new MutationObserver(function () {
+          fixBrandAndLog()
+          if (branchTimer === null) {
+            branchTimer = setTimeout(function () { branchTimer = null; refreshBranchBadge() }, 600)
+          }
+        }).observe(document.body, { childList: true, subtree: true })
         fixBrandAndLog()
+        refreshBranchBadge()
       })()`).catch(() => {}),
     ])
   } catch {
@@ -2570,6 +3845,8 @@ if (!gotLock) {
       applyConhostDelegation()
       seedDshHome()
       seedChibiSprite()  // chibi thumb for the reasoning-effort slider
+      cleanupLegacyPlugins()
+      ensureHarnessExtras()
       // seedWallpapers()  // removed: wallpaper management disabled
       ensureMcpFiles()
       ensureGlmSkill()
