@@ -81,11 +81,17 @@ if (!globalThis.__dshConsoleHideShim) {
           args[1] = ['cmd.exe', '/d', '/s', '/c', command]
           opts.shell = false
           command = LAUNCHER
-        } else if (isSandboxRunnerSpawn(command, args[1]) || isConsoleShell(command)) {
-          _log(`  → LAUNCHER routing (spawn): ${command}`)
+        } else if (isSandboxRunnerSpawn(command, args[1])) {
+          _log(`  → LAUNCHER routing (spawn sandbox): ${command}`)
           args[0] = LAUNCHER
           args[1] = [command, ...(Array.isArray(args[1]) ? args[1] : [])]
           command = LAUNCHER
+        } else if (isConsoleShell(command)) {
+          // PowerShell/cmd: suppress console via windowsHide (the launcher
+          // itself briefly creates a visible console before suppressing it,
+          // which causes the black-window flash). windowsHide + stdio pipe
+          // is sufficient on modern Windows with ConPTY.
+          _log(`  → windowsHide only (spawn): ${command}`)
         }
       }
       // spawnSync / execFile / execFileSync call libuv directly, bypassing
@@ -132,12 +138,14 @@ if (!globalThis.__dshConsoleHideShim) {
   }
 
   // Hook koffi so the sandbox's CreateProcessAsUserW calls set
-  // STARTF_USESHOWWINDOW + SW_HIDE on the STARTUPINFOW.  The sandbox
+  // STARTF_USESHOWWINDOW (0x1) + SW_HIDE on the STARTUPINFOW.  The sandbox
   // intentionally omits CREATE_NO_WINDOW (it causes STATUS_DLL_INIT_FAILED
   // under the restricted token), but SW_HIDE on the startup info is safe:
   // the console is still allocated (DLLs init fine) and the child inherits
   // the parent's hidden console — the flag just ensures the window stays
-  // invisible even when a new console is allocated.
+  // invisible even when a new console is allocated.  NOTE: dsh-win32-process
+  // now sets these fields itself (lib/index.js); this hook is the fallback
+  // for any other koffi consumer.
   try {
     const _Module = require('module')
     const _origLoad = _Module._load
@@ -171,9 +179,9 @@ if (!globalThis.__dshConsoleHideShim) {
           if (siPtr != null) {
             try {
               const si = koffi.decode(siPtr, getShadowSI())
-              if (!(si.dwFlags & 0x40)) { // STARTF_USESHOWWINDOW not yet set
-                si.dwFlags |= 0x40        // add STARTF_USESHOWWINDOW
-                si.wShowWindow = 0         // SW_HIDE
+              if (!(si.dwFlags & 0x1)) { // STARTF_USESHOWWINDOW not yet set
+                si.dwFlags |= 0x1        // add STARTF_USESHOWWINDOW
+                si.wShowWindow = 0       // SW_HIDE
                 koffi.encode(siPtr, getShadowSI(), si)
               }
             } catch (_) { /* best-effort: original call still proceeds */ }

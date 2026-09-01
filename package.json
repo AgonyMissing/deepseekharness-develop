@@ -1,6 +1,6 @@
 {
   "name": "deepseek-harness-desktop",
-  "version": "2.0.0",
+  "version": "2.0.0-alpha.2",
   "description": "DeepSeek Harness desktop app: the dsh web UI in an installable Windows shell, with the DeepSeek background artwork.",
   "main": "main.js",
   "author": "powerdog996",
@@ -63,7 +63,7 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "DeepSeek Harness",
-      "artifactName": "DeepSeek-Harness-Setup-2.0.exe"
+      "artifactName": "DeepSeek-Harness-Setup-${version}.exe"
     }
   }
 }

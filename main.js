@@ -9,7 +9,7 @@
  */
 'use strict'
 
-const { app, BrowserWindow, dialog, Menu, shell, Tray } = require('electron')
+const { app, BrowserWindow, dialog, Menu, shell, Tray, session } = require('electron')
 const { spawn, spawnSync } = require('node:child_process')
 const fs = require('node:fs')
 const { createServer } = require('node:http')
@@ -49,6 +49,16 @@ const CONHOST_DELEGATION_TERMINAL = '{B23D10C0-E52E-411E-9D5B-C09FDF709C7D}'
 /** Tray-only start: boot with no visible window (--tray flag or desktop.json
  * startHidden=true). The local server and remote tunnel keep running, and the
  * tray icon remains the way back into the window. */
+// Ensure every Node child process (MCP servers, background workers, etc.)
+// loads the console-hide-shim via NODE_OPTIONS so they route console shells
+// through hidden-console-launcher and suppress Windows console flashes.
+if (!process.env.NODE_OPTIONS || !process.env.NODE_OPTIONS.includes('console-hide-shim')) {
+  const shimArg = '--require=' + path.join(__dirname, 'resources', 'console-hide-shim.cjs')
+  process.env.NODE_OPTIONS = process.env.NODE_OPTIONS
+    ? process.env.NODE_OPTIONS + ' ' + shimArg
+    : shimArg
+}
+
 const HIDDEN_START = process.argv.includes('--tray') || (() => {
   try {
     const cfg = JSON.parse(fs.readFileSync(path.join(DSH_HOME, 'desktop.json'), 'utf8'))
@@ -259,6 +269,8 @@ function copyDirSync(from, to) {
  * the profile node_modules (installed by this shell or bundled resources).
  */
 const WEBUI_FAMILY_ROWS = [
+  // Desktop-harness settings sections: MCP servers / skills / subagents.
+  ['harness-extras', '@deepseek-ai/dsh-client-ui-harness-extras'],
 ]
 
 /**
@@ -1095,7 +1107,7 @@ function syncHooksPatch() {
 
 // ── Git panel (read-only projection over one working tree) ──────────────────
 
-const { execFile } = require('node:child_process')
+const { execFile, execFileSync } = require('node:child_process')
 
 /** Run one git command in dir; resolves { stdout } or rejects with stderr. */
 function gitRun(dir, args) {
@@ -1202,95 +1214,329 @@ function scanWorkspaces() {
 
 // ── Session archive (move idle session logs out of the live root) ──────
 
+/**
+ * Session display titles from the kernel's projection cache: one map entry
+ * per titled session. Untitled sessions resolve to a short id on the page.
+ */
+function scanSessionTitles() {
+  const cacheFile = path.join(DSH_HOME, 'storages', 'session_projcache.json')
+  const titles = {}
+  try {
+    const data = JSON.parse(fs.readFileSync(cacheFile, 'utf8'))
+    const sessions = data?.tables?.sessions
+    if (sessions !== null && typeof sessions === 'object') {
+      for (const [sessionId, row] of Object.entries(sessions)) {
+        const value = row?.rows?.title?.val
+        if (typeof value === 'string' && value !== '') titles[sessionId] = value
+      }
+    }
+  } catch { /* no cache */ }
+  // Untitled sessions display like the sidebar does: the workspace's current
+  // git branch. Cache per cwd to avoid a git call per session.
+  const branchCache = new Map()
+  const sessionsRoot = path.join(DSH_HOME, 'sessions')
+  let groups = []
+  try {
+    groups = fs.readdirSync(sessionsRoot, { withFileTypes: true })
+  } catch {
+    return titles
+  }
+  for (const group of groups) {
+    if (!group.isDirectory()) continue
+    const groupDir = path.join(sessionsRoot, group.name)
+    let subs = []
+    try {
+      subs = fs.readdirSync(groupDir, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    for (const sub of subs) {
+      if (!sub.isDirectory() || titles[sub.name] !== undefined) continue
+      const logFile = path.join(groupDir, sub.name, 'session.jsonl')
+      let cwd = ''
+      try {
+        const fd = fs.openSync(logFile, 'r')
+        const buffer = Buffer.alloc(4096)
+        const read = fs.readSync(fd, buffer, 0, 4096, 0)
+        fs.closeSync(fd)
+        cwd = JSON.parse(buffer.toString('utf8', 0, read).split(String.fromCharCode(10))[0]).cwd ?? ''
+      } catch {
+        continue
+      }
+      if (cwd === '') continue
+      let branch = branchCache.get(cwd)
+      if (branch === undefined) {
+        branch = ''
+        try {
+          branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+            cwd, timeout: 5000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'],
+          }).toString().trim()
+        } catch { /* not a repo */ }
+        branchCache.set(cwd, branch)
+      }
+      if (branch !== '') titles[sub.name] = branch
+    }
+  }
+  return titles
+}
+
 const ARCHIVE_ROOT = path.join(DSH_HOME, 'sessions-archive')
 
 /** List every session under the live and archive roots for the Archive page. */
 function scanArchive() {
+  // Truth = the registry: which sessions belong to a registered workspace and
+  // which are archived. The filesystem holds every historical session dir,
+  // including orphans the registry no longer accounts — those are surfaced
+  // separately as "unclassified" so the management page stays in sync with
+  // the sidebar (registered workspaces only), while orphans stay cleanable.
+  let archivedSet = new Set()
+  const workspaceBySession = new Map()
+  const registeredSessionIds = new Set()
+  try {
+    const registry = JSON.parse(fs.readFileSync(path.join(DSH_HOME, 'storages', 'workspace.json'), 'utf8'))
+    const list = registry?.global?.archivedSessionIds
+    if (Array.isArray(list)) archivedSet = new Set(list)
+    const workspaces = registry?.tables?.workspaces ?? {}
+    for (const workspace of Object.values(workspaces)) {
+      const title = typeof workspace?.title === 'string' ? workspace.title : ''
+      for (const sessionId of workspace?.sessionIds ?? []) {
+        registeredSessionIds.add(sessionId)
+        if (!workspaceBySession.has(sessionId)) workspaceBySession.set(sessionId, title)
+      }
+    }
+  } catch { /* no registry yet */ }
   const rows = []
-  const roots = [
-    { root: path.join(DSH_HOME, 'sessions'), archived: false },
-    { root: ARCHIVE_ROOT, archived: true },
-  ]
-  for (const { root, archived } of roots) {
-    let groups = []
+  const unclassified = []
+  const sessionsRoot = path.join(DSH_HOME, 'sessions')
+  let groups = []
+  try {
+    groups = fs.readdirSync(sessionsRoot, { withFileTypes: true })
+  } catch {
+    return { sessions: rows, unclassified }
+  }
+  for (const group of groups) {
+    if (!group.isDirectory()) continue
+    const groupDir = path.join(sessionsRoot, group.name)
+    let subs = []
     try {
-      groups = fs.readdirSync(root, { withFileTypes: true })
+      subs = fs.readdirSync(groupDir, { withFileTypes: true })
     } catch {
       continue
     }
-    for (const group of groups) {
-      if (!group.isDirectory() || group.name.startsWith('session-')) continue
-      const groupDir = path.join(root, group.name)
-      let subs = []
+    for (const sub of subs) {
+      if (!sub.isDirectory()) continue
+      const subDir = path.join(groupDir, sub.name)
+      let size = 0
+      let mtime = 0
       try {
-        subs = fs.readdirSync(groupDir, { withFileTypes: true })
-      } catch {
-        continue
+        for (const file of fs.readdirSync(subDir)) {
+          try { size += fs.statSync(path.join(subDir, file)).size } catch { /* skip */ }
+        }
+        mtime = fs.statSync(subDir).mtimeMs
+      } catch { /* skip */ }
+      console.log('[scanArchive-debug2]', JSON.stringify({ sub: sub.name.slice(0, 12), arch: archivedSet.has(sub.name), setSize: archivedSet.size, setSample: [...archivedSet].slice(0, 2).map(x => x.slice(0, 12)) }))
+      const row = {
+        group: group.name,
+        workspaceTitle: workspaceBySession.get(sub.name) ?? group.name,
+        sessionId: sub.name,
+        size,
+        mtime,
+        archived: archivedSet.has(sub.name),
       }
-      for (const sub of subs) {
-        if (!sub.isDirectory()) continue
-        const subDir = path.join(groupDir, sub.name)
-        let size = 0
-        let mtime = 0
-        try {
-          for (const file of fs.readdirSync(subDir)) {
-            try { size += fs.statSync(path.join(subDir, file)).size } catch { /* skip */ }
-          }
-          mtime = fs.statSync(subDir).mtimeMs
-        } catch { /* skip */ }
-        rows.push({
-          group: group.name,
-          sessionId: sub.name,
-          size,
-          mtime,
-          archived,
-        })
+      if (registeredSessionIds.has(sub.name)) {
+        rows.push(row)
+      } else {
+        unclassified.push(row)
       }
     }
   }
   rows.sort((a, b) => b.mtime - a.mtime)
-  return rows
+  unclassified.sort((a, b) => b.mtime - a.mtime)
+  return { sessions: rows, unclassified }
 }
 
-/** Move one session between the live and archive roots (path-scoped). */
-function moveArchiveSession(group, sessionId, archive) {
-  if (typeof group !== 'string' || typeof sessionId !== 'string') return { error: '缺少参数' }
-  if (group.includes('..') || sessionId.includes('..')) return { error: '路径不合法' }
-  const liveRoot = path.resolve(path.join(DSH_HOME, 'sessions'))
-  const live = path.resolve(liveRoot, group, sessionId)
-  if (!live.startsWith(liveRoot + path.sep)) return { error: '路径越界' }
-  const archiveRoot = path.resolve(ARCHIVE_ROOT)
-  const archived = path.resolve(archiveRoot, group, sessionId)
-  if (!archived.startsWith(archiveRoot + path.sep)) return { error: '路径越界' }
-  const from = archive === true ? live : archived
-  const to = archive === true ? archived : live
-  if (!fs.existsSync(from)) return { error: '未找到该会话' }
+/** Flip one session's archive flag in the registry file (no restart). */
+function toggleArchivedFlag(sessionId) {
+  const registryFile = path.join(DSH_HOME, 'storages', 'workspace.json')
   try {
-    fs.mkdirSync(path.dirname(to), { recursive: true })
-    fs.renameSync(from, to)
+    const data = JSON.parse(fs.readFileSync(registryFile, 'utf8'))
+    const list = data?.global?.archivedSessionIds
+    if (!Array.isArray(list)) return { error: '归档注册表不可读' }
+    const index = list.indexOf(sessionId)
+    if (index === -1) list.push(sessionId)
+    else list.splice(index, 1)
+    fs.writeFileSync(registryFile, JSON.stringify(data, null, 1), 'utf8')
     return { ok: true }
-  } catch {
-    return { error: '移动失败，会话可能正在运行中' }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) }
   }
 }
 
-/** Permanently delete one archived-or-live session directory. */
-function deleteArchiveSession(group, sessionId) {
-  if (typeof group !== 'string' || typeof sessionId !== 'string') return { error: '缺少参数' }
-  if (group.includes('..') || sessionId.includes('..')) return { error: '路径不合法' }
-  const roots = [path.resolve(path.join(DSH_HOME, 'sessions')), path.resolve(ARCHIVE_ROOT)]
-  for (const root of roots) {
-    const target = path.resolve(root, group, sessionId)
-    if (target.startsWith(root + path.sep) && fs.existsSync(target)) {
-      try {
-        fs.rmSync(target, { recursive: true, force: true })
-        return { ok: true }
-      } catch {
-        return { error: '删除失败，会话可能正在运行中' }
+function modifyArchivedSessions(sessionId, remove) {
+  const registryFile = path.join(DSH_HOME, 'storages', 'workspace.json')
+  try {
+    const data = JSON.parse(fs.readFileSync(registryFile, 'utf8'))
+    const list = data?.global?.archivedSessionIds
+    if (!Array.isArray(list)) return { error: '归档注册表不可读' }
+    const index = list.indexOf(sessionId)
+    if (remove === true) {
+      if (index !== -1) list.splice(index, 1)
+    } else if (index === -1) {
+      list.push(sessionId)
+    }
+    fs.writeFileSync(registryFile, JSON.stringify(data, null, 1), 'utf8')
+    return { ok: true }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+
+
+/** Archive/restore one session by flipping its id in the registry's archive
+ *  set on disk. No restart: the desktop page drives archive state through the
+ *  kernel RPC (instant, broadcast); these file-level helpers are only a
+ *  fallback for the raw dialog endpoints and take effect on next boot. */
+/** Call one dsh Gateway Remote endpoint through the server's token URL. */
+async function dshRemote(endpoint, payload) {
+  if (serverUrl === null) throw new Error('dsh 服务器未就绪')
+  const url = new URL(serverUrl)
+  const token = url.searchParams.get('token')
+  const target = new URL(url.origin + '/remotes/' + endpoint)
+  if (token !== null) target.searchParams.set('token', token)
+  const message = {
+    type: 'client-request',
+    rpcId: 'desktop-' + Date.now().toString(36),
+    method: endpoint,
+    payload,
+  }
+  const response = await fetch(target.toString(), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(message),
+  })
+  const text = await response.text()
+  console.log(`[dsh-rpc] ${endpoint} -> ${response.status} ${text.slice(0, 160)}`)
+  if (!response.ok) {
+    throw new Error(`remote ${endpoint} failed: HTTP ${response.status} ${text.slice(0, 200)}`)
+  }
+  try {
+    return JSON.parse(text)
+  } catch {
+    return null
+  }
+}
+
+/** Archive/restore one session through the kernel's own toggle RPC. */
+async function dshArchiveSession(sessionId) {
+  if (typeof sessionId !== 'string' || !/^(session-)?[\w-]+$/.test(sessionId)) return { error: '标识不合法' }
+  try {
+    const result = await dshRemote('workspace/archiveSession', { sessionId })
+    if (result === null) return { ok: true }
+    const error = result?.error
+    if (error !== undefined && error !== null) {
+      return { error: typeof error === 'string' ? error : JSON.stringify(error) }
+    }
+    return { ok: true }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+function dshArchiveSessionFile(sessionId, wantArchived) {
+  if (typeof sessionId !== 'string' || !/^(session-)?[\w-]+$/.test(sessionId)) return { error: '标识不合法' }
+  const result = modifyArchivedSessions(sessionId, !wantArchived)
+  if (result.error !== undefined) return result
+  return { ok: true }
+}
+
+/** Restore one archived session via the file-level fallback. */
+function restoreArchivedSession(sessionId) {
+  return dshArchiveSessionFile(sessionId, false)
+}
+
+/** Archive one session via the file-level fallback. */
+function archiveSessionFlag(sessionId) {
+  return dshArchiveSessionFile(sessionId, true)
+}
+
+/** Remove one session id from every workspace's sessionIds in the registry file. */
+function removeSessionFromRegistry(sessionId) {
+  const registryFile = path.join(DSH_HOME, 'storages', 'workspace.json')
+  try {
+    const registry = JSON.parse(fs.readFileSync(registryFile, 'utf8'))
+    const workspaces = registry?.tables?.workspaces ?? {}
+    let changed = false
+    for (const workspace of Object.values(workspaces)) {
+      const ids = workspace?.sessionIds
+      if (Array.isArray(ids) && ids.includes(sessionId)) {
+        workspace.sessionIds = ids.filter(id => id !== sessionId)
+        changed = true
       }
     }
+    if (changed) fs.writeFileSync(registryFile, JSON.stringify(registry, null, 1), 'utf8')
+  } catch { /* best-effort */ }
+}
+
+/** Permanently delete one session: remove its log dirs, clear its archive
+ *  flag, AND unlist it from every workspace's sessionIds so the ghost cannot
+ *  reappear. */
+function deleteArchiveSession(group, sessionId) {
+  if (typeof sessionId !== 'string' || !/^(session-)?[\w-]+$/.test(sessionId)) return { error: '标识不合法' }
+  deleteSessionDirectories(sessionId)
+  modifyArchivedSessions(sessionId, true)
+  removeSessionFromRegistry(sessionId)
+  // Bounce so the running kernel re-reads the registry and the sidebar
+  // (which lists sessions from the registry) hides the deleted session.
+  scheduleServerRestart()
+  return { ok: true }
+}
+
+/** Rendered git graph (ASCII commit graph across all branches). */
+async function scanGitGraph(dir) {
+  const resolved = path.resolve(typeof dir === 'string' && dir.trim() !== '' ? dir.trim() : DSH_HOME)
+  if (!fs.existsSync(resolved)) return { error: '目录不存在' }
+  try {
+    const [text, nodes] = await Promise.all([
+      gitRun(resolved, [
+        'log', '--graph', '--oneline', '--all', '--decorate', '-40',
+      ]).catch(() => ({ stdout: '' })),
+      gitRun(resolved, [
+        'log', '--all', '-40',
+        '--pretty=format:%H%x1f%P%x1f%h%x1f%s%x1f%D%x1f%ad%x1f%an',
+        '--date=format:%m/%d %H:%M',
+      ]).catch(() => ({ stdout: '' })),
+    ])
+    const commits = nodes.stdout.split('\n').filter(line => line.trim() !== '').map(line => {
+      const [hash, parents, short, subject, refs, date, author] = line.split('\x1f')
+      return {
+        hash,
+        parents: typeof parents === 'string' && parents !== '' ? parents.split(' ') : [],
+        short: short ?? '',
+        subject: subject ?? '',
+        refs: refs ?? '',
+        date: date ?? '',
+        author: author ?? '',
+      }
+    })
+    return { path: resolved, graph: text.stdout, commits }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) }
   }
-  return { error: '未找到该会话' }
+}
+
+/** Create-and-checkout (or plain checkout) one branch. */
+async function gitCheckoutBranch(dir, branch, create) {
+  const resolved = path.resolve(typeof dir === 'string' && dir.trim() !== '' ? dir.trim() : DSH_HOME)
+  if (!fs.existsSync(resolved)) return { error: '目录不存在' }
+  if (typeof branch !== 'string' || !/^[A-Za-z0-9._\/-]{1,80}$/.test(branch)) return { error: '分支名不合法' }
+  try {
+    const args = create === true ? ['checkout', '-b', branch] : ['checkout', branch]
+    const { stdout } = await gitRun(resolved, args)
+    return { ok: true, output: stdout.trim() }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) }
+  }
 }
 
 /** Switch one working tree to another branch (creating it when asked). */
@@ -1389,36 +1635,62 @@ function readTextFileHead(filePath) {
 
 // ── Terminal (HTTP command panel; per-panel cwd kept server-side) ────────────
 
-const terminalSessions = new Map()
+// ── Terminal (real PTY via node-pty; SSE output, POST input) ────────────────
+
+let ptyLib = null
+
+/** Lazily resolve the bundled node-pty (native module ships with the kernel). */
+function getPty() {
+  if (ptyLib === null) {
+    ptyLib = require(path.join(__dirname, 'resources', 'dsh', 'node_modules', 'node-pty'))
+  }
+  return ptyLib
+}
+
+const ptySessions = new Map()
 let terminalSeq = 0
 
-/** Execute one command inside a panel's cwd; `cd` mutates the panel cwd. */
-function runTerminalCommand(panelId, command) {
-  const id = typeof panelId === 'string' && panelId !== '' ? panelId : 'panel-' + String(++terminalSeq)
-  let cwd = terminalSessions.get(id) ?? DSH_HOME
-  if (typeof command !== 'string' || command.trim() === '') {
-    return Promise.resolve({ panel: id, cwd, output: '' })
-  }
-  const trimmed = command.trim()
-  if (/^cd(\s|$)/.test(trimmed)) {
-    const target = trimmed.slice(2).trim() || DSH_HOME
-    const resolved = path.resolve(cwd, target.replace(/^"(.*)"$/, '$1'))
-    if (!fs.existsSync(resolved)) {
-      return Promise.resolve({ panel: id, cwd, output: '目录不存在: ' + resolved })
-    }
-    cwd = resolved
-    terminalSessions.set(id, cwd)
-    return Promise.resolve({ panel: id, cwd, output: '' })
-  }
-  return new Promise((resolve) => {
-    const isWin = process.platform === 'win32'
-    const shell = isWin ? 'cmd' : '/bin/sh'
-    const shellArgs = isWin ? ['/c', trimmed] : ['-c', trimmed]
-    execFile(shell, shellArgs, { cwd, timeout: 60000, maxBuffer: 1024 * 1024, windowsHide: true }, (error, stdout, stderr) => {
-      const output = [stdout, stderr, error !== null && error.killed === true ? '\n[超时或被终止]' : ''].join('').trimEnd()
-      resolve({ panel: id, cwd, output })
-    })
+/** Spawn (or reuse) the persistent shell behind one terminal panel. */
+function ensurePty(panelId) {
+  let session = ptySessions.get(panelId)
+  if (session !== undefined) return session
+  const isWin = process.platform === 'win32'
+  const file = isWin ? 'powershell.exe' : 'bash'
+  const pty = getPty().spawn(file, isWin ? ['-NoProfile', '-NoLogo'] : [], {
+    name: 'xterm-256color',
+    cols: 110,
+    rows: 30,
+    cwd: DSH_HOME,
+    env: { ...process.env, TERM: 'xterm-256color' },
+    experimentalWin32Process: true,
+    useConpty: true,
   })
+  session = { pty, backlog: '', clients: new Set(), exited: false }
+  pty.onData((data) => {
+    session.backlog += data
+    if (session.backlog.length > 400000) session.backlog = session.backlog.slice(-200000)
+    for (const res of session.clients) {
+      try { res.write(`data: ${JSON.stringify(data)}\n\n`) } catch { /* client gone */ }
+    }
+  })
+  pty.onExit(() => {
+    session.exited = true
+    for (const res of session.clients) {
+      try { res.write('data: [EXITED]\n\n'); res.end() } catch { /* already gone */ }
+    }
+    ptySessions.delete(panelId)
+  })
+  ptySessions.set(panelId, session)
+  return session
+}
+
+/** Strip the ambient child-process spawn inside the app so hidden consoles
+ *  stay hidden even from the PTY's grandchildren. */
+function teardownPtySessions() {
+  for (const [, session] of ptySessions) {
+    try { session.pty.kill() } catch { /* already gone */ }
+  }
+  ptySessions.clear()
 }
 
 /**
@@ -1427,6 +1699,50 @@ function runTerminalCommand(panelId, command) {
  * default model, so a fresh install only needs its own DeepSeek API key.
  * Existing user settings are never overwritten.
  */
+/** Purge ghost session ids: every registry reference whose log directory
+ *  no longer exists on disk is unlisted from its workspace and the archive
+ *  set. Runs at boot so lists stay in sync with reality. */
+function purgeGhostSessions() {
+  const registryFile = path.join(DSH_HOME, 'storages', 'workspace.json')
+  if (!fs.existsSync(registryFile)) return
+  const sessionsRoot = path.join(DSH_HOME, 'sessions')
+  const onDisk = new Set()
+  try {
+    for (const group of fs.readdirSync(sessionsRoot, { withFileTypes: true })) {
+      if (!group.isDirectory()) continue
+      for (const sub of fs.readdirSync(path.join(sessionsRoot, group.name))) {
+        onDisk.add(sub)
+      }
+    }
+  } catch {
+    return
+  }
+  let changed = false
+  try {
+    const registry = JSON.parse(fs.readFileSync(registryFile, 'utf8'))
+    const workspaces = registry?.tables?.workspaces ?? {}
+    for (const workspace of Object.values(workspaces)) {
+      const ids = workspace?.sessionIds
+      if (Array.isArray(ids)) {
+        const kept = ids.filter(id => onDisk.has(id))
+        if (kept.length !== ids.length) {
+          workspace.sessionIds = kept
+          changed = true
+        }
+      }
+    }
+    const archived = registry?.global?.archivedSessionIds
+    if (Array.isArray(archived)) {
+      const kept = archived.filter(id => onDisk.has(id))
+      if (kept.length !== archived.length) {
+        registry.global.archivedSessionIds = kept
+        changed = true
+      }
+    }
+    if (changed) fs.writeFileSync(registryFile, JSON.stringify(registry, null, 1), 'utf8')
+  } catch { /* best-effort */ }
+}
+
 function seedDshHome() {
   fs.mkdirSync(DSH_HOME, { recursive: true })
   const settingsFile = path.join(DSH_HOME, 'settings.yaml')
@@ -3104,6 +3420,24 @@ function startDialogServer() {
         })()
         return
       }
+      if (url.pathname === '/git/graph' && req.method === 'GET') {
+        scanGitGraph(url.searchParams.get('path')).then(result => sendJson(200, result)).catch(() => sendJson(500, { error: 'git graph 失败' }))
+        return
+      }
+      if (url.pathname === '/git/checkout' && req.method === 'POST') {
+        void (async () => {
+          try {
+            const chunks = []
+            for await (const chunk of req) chunks.push(chunk)
+            const body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+            const result = await gitCheckoutBranch(body.path, body.branch, body.create === true)
+            sendJson(result.error !== undefined ? 400 : 200, result)
+          } catch (error) {
+            sendJson(400, { error: error instanceof Error ? error.message : String(error) })
+          }
+        })()
+        return
+      }
       if (url.pathname === '/git/commit' && req.method === 'POST') {
         void (async () => {
           try {
@@ -3127,7 +3461,61 @@ function startDialogServer() {
         return
       }
       if (url.pathname === '/archive' && req.method === 'GET') {
-        sendJson(200, { sessions: scanArchive() })
+        const _res = scanArchive()
+        console.log('[scanArchive-debug]', JSON.stringify(_res?.sessions?.map(x => ({ id: x.sessionId.slice(0, 12), arch: x.archived }))))
+        sendJson(200, _res)
+        return
+      }
+      if (url.pathname === '/term-stream' && req.method === 'GET') {
+        const panel = url.searchParams.get('panel') ?? 'main'
+        const session = ensurePty(panel)
+        res.writeHead(200, {
+          'content-type': 'text/event-stream',
+          'cache-control': 'no-cache',
+          connection: 'keep-alive',
+          'access-control-allow-origin': '*',
+        })
+        res.write(`data: ${JSON.stringify(session.backlog)}
+
+`)
+        session.clients.add(res)
+        req.on('close', () => { session.clients.delete(res) })
+        return
+      }
+      if (url.pathname === '/term-input' && req.method === 'POST') {
+        void (async () => {
+          try {
+            const chunks = []
+            for await (const chunk of req) chunks.push(chunk)
+            const body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+            const session = ensurePty(typeof body.panel === 'string' && body.panel !== '' ? body.panel : 'main')
+            if (session.exited !== true && typeof body.data === 'string') session.pty.write(body.data)
+            sendJson(200, { ok: true })
+          } catch (error) {
+            sendJson(400, { error: error instanceof Error ? error.message : String(error) })
+          }
+        })()
+        return
+      }
+      if (url.pathname === '/term-resize' && req.method === 'POST') {
+        void (async () => {
+          try {
+            const chunks = []
+            for await (const chunk of req) chunks.push(chunk)
+            const body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+            const session = ptySessions.get(typeof body.panel === 'string' ? body.panel : 'main')
+            if (session !== undefined && Number.isFinite(body.cols) && Number.isFinite(body.rows)) {
+              session.pty.resize(Math.round(body.cols), Math.round(body.rows))
+            }
+            sendJson(200, { ok: true })
+          } catch (error) {
+            sendJson(400, { error: error instanceof Error ? error.message : String(error) })
+          }
+        })()
+        return
+      }
+      if (url.pathname === '/session-titles' && req.method === 'GET') {
+        sendJson(200, { titles: scanSessionTitles() })
         return
       }
       if (url.pathname === '/archive/move' && req.method === 'POST') {
@@ -3136,7 +3524,11 @@ function startDialogServer() {
             const chunks = []
             for await (const chunk of req) chunks.push(chunk)
             const body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
-            const result = moveArchiveSession(body.group, body.sessionId, body.archive === true)
+            // Session archive lives in the registry flag (moveArchiveSession
+            // moved DIRECTORY trees in the old build; the registry owns state now).
+            const result = body.archive === true
+              ? await archiveSessionFlag(body.sessionId)
+              : await restoreArchivedSession(body.sessionId)
             sendJson(result.error !== undefined ? 400 : 200, result)
           } catch (error) {
             sendJson(400, { error: error instanceof Error ? error.message : String(error) })
@@ -3144,51 +3536,92 @@ function startDialogServer() {
         })()
         return
       }
+      if (url.pathname === '/session-restore' && req.method === 'POST') {
+        void (async () => {
+          try {
+            const chunks = []
+            for await (const chunk of req) chunks.push(chunk)
+            const body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+            const result = await restoreArchivedSession(body.sessionId)
+            sendJson(result.error !== undefined ? 400 : 200, result)
+          } catch (error) {
+            sendJson(400, { error: error instanceof Error ? error.message : String(error) })
+          }
+        })()
+        return
+      }
+      if (url.pathname === '/session-toggle' && req.method === 'POST') {
+        // Toggle the registry archive flag on disk, then bounce the host so
+        // the running server reloads the file. Memory/file stay in step and
+        // the sidebar (which filters archived ids) hides the session — one
+        // brief restart is the kernel's own contract for archive state.
+        const sessionId = url.searchParams.get('sessionId')
+        if (typeof sessionId !== 'string' || !/^(session-)?[\w-]+$/.test(sessionId)) {
+          sendJson(400, { error: '标识不合法' })
+          return
+        }
+        const result = toggleArchivedFlag(sessionId)
+        if (result.error !== undefined) { sendJson(400, result); return }
+        scheduleServerRestart()
+        sendJson(200, { ok: true })
+        return
+      }
+      if (url.pathname === '/session-delete' && req.method === 'DELETE') {
+        const result = deleteArchiveSession(null, url.searchParams.get('sessionId'))
+        sendJson(result.error !== undefined ? 400 : 200, result)
+        return
+      }
       if (url.pathname === '/archive' && req.method === 'DELETE') {
         const result = deleteArchiveSession(url.searchParams.get('group'), url.searchParams.get('sessionId'))
         sendJson(result.error !== undefined ? 400 : 200, result)
         return
       }
-      if (url.pathname === '/term' && req.method === 'POST') {
-        try {
-          const chunks = []
-          for await (const chunk of req) chunks.push(chunk)
-          const body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
-          runTerminalCommand(body.panel, body.command).then(result => sendJson(200, result))
-        } catch (error) {
-          sendJson(400, { error: error instanceof Error ? error.message : String(error) })
-        }
-        return
-      }
       sendJson(404, { error: 'not found' })
     })
     server.on('error', reject)
-    server.listen(0, '127.0.0.1', () => {
-      dialogPort = server.address().port
+    // Fixed loopback port so the page's injected __DSH_MCP_API__ stays valid
+    // across in-app server restarts (a random port would orphan the old value).
+    server.listen(17891, '127.0.0.1', () => {
+      dialogPort = 17891
       dialogServer = server
       resolve()
     })
   })
 }
 
-/** Terminate the server process tree (Windows cannot deliver POSIX signals). */
+/**
+ * Terminate the server process tree (Windows cannot deliver POSIX signals).
+ * Resolves once the child has exited (or ~4s have passed), so a same-port
+ * relaunch does not race the old listener.
+ */
 function stopServer() {
-  if (server === null || server.killed) return
-  const pid = server.pid
-  server.kill()
+  if (server === null || server.killed) return Promise.resolve()
+  const child = server
+  const pid = child.pid
+  child.kill()
   if (process.platform === 'win32') {
     spawn('taskkill', ['/pid', String(pid), '/T', '/F'], {
       stdio: 'ignore',
       windowsHide: true,
     })
   }
+  return new Promise((resolve) => {
+    if (child.exitCode !== null || child.signalCode !== null) return resolve()
+    const timer = setTimeout(resolve, 4000)
+    child.once('exit', () => {
+      clearTimeout(timer)
+      resolve()
+    })
+  })
 }
 
 let restartTimer = null
 
 /**
- * Debounced MCP-change restart: save requests respond immediately, then the
- * dsh server restarts with the regenerated patch and the window reloads.
+ * Debounced config-change restart: save requests respond immediately, then
+ * the dsh server restarts with the regenerated patch. When the server keeps
+ * the same origin the page stays put and the kernel's connection layer
+ * reconnects+resyncs in place; only a port change forces a full reload.
  */
 function scheduleServerRestart() {
   if (SMOKE) return
@@ -3200,18 +3633,98 @@ function scheduleServerRestart() {
 }
 
 /** Restart the dsh server on the same window and re-inject the shell UI. */
+/**
+ * Session operations deferred to the restart window: the dsh server holds
+ * the registry state and the session log handles, so workspace.json edits
+ * and directory deletes only land safely once it has stopped.
+ */
+const pendingSessionOps = []
+
+/** Apply the deferred session ops between server stop and start. */
+function applyPendingSessionOps() {
+  for (const op of pendingSessionOps.splice(0)) {
+    try {
+      if (op.type === 'restore') {
+        modifyArchivedSessions(op.sessionId, true)
+      } else if (op.type === 'archive') {
+        modifyArchivedSessions(op.sessionId, false)
+      } else if (op.type === 'delete') {
+        const result = deleteSessionDirectories(op.sessionId)
+        if (result.error !== undefined) console.error(`[session-op] delete ${op.sessionId}: ${result.error}`)
+      }
+    } catch (error) {
+      console.error('[session-op] failed:', error)
+    }
+  }
+}
+
+/** Remove every log directory of one session, root-level or grouped. */
+function deleteSessionDirectories(sessionId) {
+  // Guard: only well-formed session ids may be removed; a bare root must
+  // never match, so the whole sessions tree can't be swept by a bad arg.
+  if (typeof sessionId !== 'string' || !/^(session-)?[\w-]+$/.test(sessionId) || sessionId.length < 8) {
+    return { error: '标识不合法' }
+  }
+  const roots = [path.join(DSH_HOME, 'sessions'), path.join(DSH_HOME, 'sessions-archive')]
+  let deleted = false
+  for (const root of roots) {
+    const direct = path.join(root, sessionId)
+    if (fs.existsSync(direct)) {
+      const st = fs.statSync(direct)
+      if (!st.isDirectory()) { fs.rmSync(direct, { force: true }); deleted = true }
+      else if (direct !== root) { fs.rmSync(direct, { recursive: true, force: true }); deleted = true }
+    }
+    let groups = []
+    try {
+      groups = fs.readdirSync(root, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    for (const entry of groups) {
+      if (!entry.isDirectory() || entry.name.startsWith('session-')) continue
+      const target = path.join(root, entry.name, sessionId)
+      if (fs.existsSync(target)) {
+        fs.rmSync(target, { recursive: true, force: true })
+        deleted = true
+      }
+    }
+  }
+  return deleted ? { ok: true } : { error: '未找到该会话' }
+}
+
+let sessionRestartInFlight = false
+
 async function restartServerAndReload() {
   if (quitting || mainWindow === null || mainWindow.isDestroyed()) return
+  if (sessionRestartInFlight) return
+  sessionRestartInFlight = true
   try {
-    stopServer()
+    await stopServer()
+    applyPendingSessionOps()
     const url = await startServer()
     serverUrl = url
-    await mainWindow.loadURL(url)
-    await injectThemeGuard(mainWindow)
-    void injectBackgroundWhenReady(mainWindow)
-    void injectEffortSlider(mainWindow)
-  } catch {
-    // The old page stays visible if the restart fails.
+    // Same-origin restart: the browser cookie (minted on first load, signed
+    // with the persistent secret) still authenticates, so keep the SPA alive
+    // and let the kernel connection layer reconnect+resync in place instead
+    // of re-booting the whole page (which flashes a boot screen and drops
+    // the user out of the settings page). No overlay: the MCP/skills
+    // sections show their own lightweight "重启中…" row hints.
+    let sameOrigin = false
+    try {
+      const prev = new URL(mainWindow.webContents.getURL())
+      const next = new URL(url)
+      sameOrigin = prev.origin === next.origin && next.origin !== 'null'
+    } catch {}
+    if (!sameOrigin) {
+      await mainWindow.loadURL(url)
+      await injectThemeGuard(mainWindow)
+      void injectBackgroundWhenReady(mainWindow)
+      void injectEffortSlider(mainWindow)
+    }
+  } catch (error) {
+    console.error('[session-restart] failed:', error)
+  } finally {
+    sessionRestartInFlight = false
   }
 }
 
@@ -3289,7 +3802,7 @@ function startServer() {
     })
     child.on('exit', (code, signal) => {
       if (serverUrl !== null) {
-        console.error(`[dsh-server] exited post-ready code=${code} signal=${signal}\n${stderr.slice(-4000)}`)
+        try { console.error(`[dsh-server] exited post-ready code=${code} signal=${signal}`) } catch {}
         return
       }
       clearTimeout(timeout)
@@ -3511,12 +4024,13 @@ async function injectBackgroundWhenReady(win) {
         new MutationObserver(dedupTooltips).observe(document.body, { childList: true, subtree: true })
         dedupTooltips()
       })()`).catch(() => {}),
-      // ── Brand title + Session-log button reposition + workspace git badge ──
+      // ── Brand title + Session-log reposition + workspace branch switcher ──
       win.webContents.executeJavaScript(`(() => {
+        function DSH_API() { return window.__DSH_MCP_API__ || '' }
         var branchCache = {}
-        var DSH_API = function () { return window.__DSH_MCP_API__ || '' }()
+        var panelEl = null
+
         function fixBrandAndLog() {
-          // 1. Replace "DSH 本地构建" / "DSH Local Build" brand with DeepSeek Harness
           document.querySelectorAll('*').forEach(function(el) {
             if (el.children.length === 0 && el.textContent) {
               var t = el.textContent.trim()
@@ -3525,7 +4039,6 @@ async function injectBackgroundWhenReady(win) {
               }
             }
           })
-          // 2. Nudge the "Session 日志" button down
           document.querySelectorAll('button').forEach(function(btn) {
             var t = btn.textContent.trim()
             if (t === 'Session 日志' || t === '会话日志' || /Session\\s*日志/.test(t)) {
@@ -3534,33 +4047,15 @@ async function injectBackgroundWhenReady(win) {
             }
           })
         }
-        // 3. Workspace git badge: show the branch of the active session's
-        //    workspace next to its chip in the composer header.
-        var branchTimer = null
-        function fetchJson(url) {
-          return fetch(DSH_API() + url).then(function (r) { return r.json() })
+
+        function fetchJson(url, options) {
+          return fetch(DSH_API() + url, options).then(function (r) { return r.json() })
         }
-        function showBadge(anchor, text) {
-          if (anchor === null || anchor.parentElement === null) return
-          var badge = anchor.parentElement.querySelector('.dshx-branch-badge')
-          if (text === '') {
-            if (badge !== null) badge.remove()
-            return
-          }
-          if (badge === null) {
-            badge = document.createElement('span')
-            badge.className = 'dshx-branch-badge'
-            badge.style.cssText = 'display:inline-flex;align-items:center;gap:4px;margin-left:10px;padding:2px 10px;'
-              + 'font-size:12px;border-radius:999px;cursor:default;'
-              + 'border:1px solid var(--dsw-alias-border-l2,rgba(121,126,145,.3));'
-              + 'color:var(--dsw-alias-label-secondary,#686c75);'
-            anchor.parentElement.insertBefore(badge, anchor.nextSibling)
-          }
-          badge.textContent = '⎇ ' + text
+        function esc(t) {
+          return String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
         }
+
         function findWorkspaceChip() {
-          // The workspace chip is the button carrying the active workspace name
-          // in the composer header row (next to the preset chip).
           var buttons = document.querySelectorAll('button')
           for (var i = 0; i < buttons.length; i++) {
             var b = buttons[i]
@@ -3570,11 +4065,42 @@ async function injectBackgroundWhenReady(win) {
             if (text === '' || text.length > 60) continue
             if (/^(对话|轨迹|新会话|设置|标准模式|跟随系统|Workspace)/.test(text)) continue
             if (b.querySelector('svg') === null) continue
-            if (text.indexOf('⎇') !== -1) continue
             return b
           }
           return null
         }
+
+        function showBadge(anchor, text) {
+          if (anchor === null || anchor.parentElement === null) return
+          var badge = anchor.parentElement.querySelector('.dshx-branch-badge')
+          if (text === '') {
+            if (badge !== null) badge.remove()
+            return
+          }
+          if (badge === null) {
+            badge = document.createElement('button')
+            badge.type = 'button'
+            badge.className = 'dshx-branch-badge'
+            badge.style.cssText = 'display:inline-flex;align-items:center;gap:4px;margin-left:10px;padding:2px 10px;'
+              + 'font-size:12px;border-radius:999px;cursor:pointer;'
+              + 'border:1px solid var(--dsw-alias-border-l2,rgba(121,126,145,.3));'
+              + 'color:var(--dsw-alias-label-secondary,#686c75);background:transparent;'
+            anchor.parentElement.insertBefore(badge, anchor.nextSibling)
+            badge.addEventListener('click', function (ev) {
+              ev.stopPropagation()
+              togglePanel(badge)
+            })
+          }
+          badge.textContent = '⎇ ' + text
+        }
+
+        function resolveWorkspacePath(name) {
+          return fetchJson('/workspaces').then(function (data) {
+            var row = (data.workspaces || []).find(function (w) { return w.name === name })
+            return row === undefined ? '' : row.path
+          })
+        }
+
         function refreshBranchBadge() {
           if (DSH_API() === '') return
           var chip = findWorkspaceChip()
@@ -3582,16 +4108,126 @@ async function injectBackgroundWhenReady(win) {
           var name = chip.textContent.trim()
           var cached = branchCache[name]
           if (cached !== undefined) { showBadge(chip, cached); return }
-          fetchJson('/workspaces').then(function (data) {
-            var row = (data.workspaces || []).find(function (w) { return w.name === name })
-            if (row === undefined) { branchCache[name] = ''; showBadge(chip, ''); return }
-            return fetchJson('/git?path=' + encodeURIComponent(row.path)).then(function (git) {
+          resolveWorkspacePath(name).then(function (wsPath) {
+            if (wsPath === '') { branchCache[name] = ''; showBadge(chip, ''); return }
+            return fetchJson('/git?path=' + encodeURIComponent(wsPath)).then(function (git) {
               var branch = git && git.branch ? git.branch : ''
               branchCache[name] = branch
               showBadge(chip, branch)
             })
           }).catch(function () {})
         }
+
+        function closePanel() {
+          if (panelEl !== null) { panelEl.remove(); panelEl = null }
+        }
+        document.addEventListener('click', function (ev) {
+          if (panelEl !== null && !panelEl.contains(ev.target)) closePanel()
+        })
+
+        function styles() {
+          if (document.getElementById('dshx-branch-style') !== null) return
+          var tag = document.createElement('style')
+          tag.id = 'dshx-branch-style'
+          tag.textContent = [
+            '.dshx-bp { position:fixed; z-index:2147483000; width:300px; max-height:420px;',
+            '  overflow:auto; background:var(--dsw-alias-bg-base,#fff);',
+            '  border:1px solid var(--dsw-alias-border-l2,rgba(121,126,145,.3)); border-radius:12px;',
+            '  box-shadow:0 12px 40px rgba(18,24,42,.22); padding:10px; font:13px system-ui;',
+            '  color:var(--dsw-alias-label-primary,#1a1d26); }',
+            '.dshx-bp h4 { margin:4px 0 8px; font-size:12px; color:var(--dsw-alias-label-tertiary,#9296a0); }',
+            '.dshx-bp .bi { display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:8px;',
+            '  cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }',
+            '.dshx-bp .bi:hover { background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.06)); }',
+            '.dshx-bp .bi[data-cur="true"] { font-weight:600; color:var(--dsw-alias-label-primary,#1a1d26); }',
+            '.dshx-bp input { width:100%; box-sizing:border-box; height:30px; padding:0 8px; margin:4px 0;',
+            '  font-size:12.5px; border:1px solid var(--dsw-alias-border-l2,rgba(121,126,145,.3));',
+            '  border-radius:8px; background:transparent; color:inherit; outline:none; }',
+            '.dshx-bp .btn { display:inline-block; padding:5px 12px; margin:2px 4px 6px 0; font-size:12px;',
+            '  border-radius:8px; cursor:pointer; border:1px solid var(--dsw-alias-border-l2,rgba(121,126,145,.35));',
+            '  background:transparent; color:inherit; }',
+            '.dshx-bp .btn:hover { background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.06)); }',
+            '.dshx-bp pre { font:11px/1.5 ui-monospace,Consolas,monospace; white-space:pre; overflow:auto;',
+            '  max-height:300px; margin:4px 0; padding:8px; border-radius:8px;',
+            '  background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.04)); }',
+            '.dshx-bp .err { color:#c83e4d; font-size:12px; }',
+          ].join('\\n')
+          document.head.appendChild(tag)
+        }
+
+        function togglePanel(anchor) {
+          if (panelEl !== null) { closePanel(); return }
+          styles()
+          var rect = anchor.getBoundingClientRect()
+          panelEl = document.createElement('div')
+          panelEl.className = 'dshx-bp'
+          panelEl.style.top = Math.min(rect.bottom + 6, window.innerHeight - 430) + 'px'
+          panelEl.style.left = Math.max(8, Math.min(rect.left - 40, window.innerWidth - 312)) + 'px'
+          panelEl.innerHTML = '<h4>加载中…</h4>'
+          document.body.appendChild(panelEl)
+          var chip = findWorkspaceChip()
+          var wsName = chip !== null ? chip.textContent.trim() : ''
+          resolveWorkspacePath(wsName).then(function (wsPath) {
+            if (wsPath === '') { panelEl.innerHTML = '<h4 class="err">未找到工作区</h4>'; return }
+            return fetchJson('/git?path=' + encodeURIComponent(wsPath)).then(function (git) {
+              if (git.error !== undefined) { panelEl.innerHTML = '<h4 class="err">' + esc(git.error) + '</h4>'; return }
+              renderPanel(wsPath, git)
+            })
+          }).catch(function (err) { panelEl.innerHTML = '<h4 class="err">' + esc(String(err)) + '</h4>' })
+        }
+
+        function renderPanel(wsPath, git) {
+          var current = git.branch
+          var html = '<h4>当前分支：' + esc(current) + '</h4>'
+          html += '<input placeholder="新分支名，创建并检出…" id="dshx-newbranch">'
+          html += '<button class="btn" id="dshx-create">创建并检出</button>'
+          html += '<div style="margin-top:6px">'
+          ;(git.branches || []).forEach(function (b) {
+            if (b === current) return
+            html += '<div class="bi" data-branch="' + esc(b) + '">⎇ ' + esc(b) + '</div>'
+          })
+          html += '</div>'
+          html += '<button class="btn" id="dshx-graph">查看 Git 图谱</button>'
+          html += '<div id="dshx-graph-out"></div>'
+          panelEl.innerHTML = html
+          panelEl.querySelectorAll('.bi').forEach(function (row) {
+            row.addEventListener('click', function () {
+              switchBranch(wsPath, row.getAttribute('data-branch'), false)
+            })
+          })
+          panelEl.querySelector('#dshx-create').addEventListener('click', function () {
+            var name = panelEl.querySelector('#dshx-newbranch').value.trim()
+            if (name === '') return
+            switchBranch(wsPath, name, true)
+          })
+          panelEl.querySelector('#dshx-graph').addEventListener('click', function () {
+            var out = panelEl.querySelector('#dshx-graph-out')
+            out.innerHTML = '<h4>加载中…</h4>'
+            fetchJson('/git/graph?path=' + encodeURIComponent(wsPath)).then(function (g) {
+              if (g.error !== undefined) { out.innerHTML = '<div class="err">' + esc(g.error) + '</div>'; return }
+              out.innerHTML = '<pre>' + esc(g.graph) + '</pre>'
+            }).catch(function (err) { out.innerHTML = '<div class="err">' + esc(String(err)) + '</div>' })
+          })
+        }
+
+        function switchBranch(wsPath, branch, create) {
+          fetchJson('/git/checkout', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ path: wsPath, branch: branch, create: create === true }),
+          }).then(function (result) {
+            if (result.error !== undefined && result.error !== '') {
+              panelEl.innerHTML = '<h4 class="err">' + esc(result.error) + '</h4>'
+              setTimeout(closePanel, 2500)
+              return
+            }
+            Object.keys(branchCache).forEach(function (k) { delete branchCache[k] })
+            closePanel()
+            refreshBranchBadge()
+          }).catch(function (err) { panelEl.innerHTML = '<h4 class="err">' + esc(String(err)) + '</h4>' })
+        }
+
+        var branchTimer = null
         new MutationObserver(function () {
           fixBrandAndLog()
           if (branchTimer === null) {
@@ -3599,6 +4235,14 @@ async function injectBackgroundWhenReady(win) {
           }
         }).observe(document.body, { childList: true, subtree: true })
         fixBrandAndLog()
+        // Debug: list workspaces service methods
+        if (window.__DSH_WORKSPACES_DEBUG__ !== true) {
+          window.__DSH_WORKSPACES_DEBUG__ = true
+          // This runs in the browser context; ctx is not directly accessible
+          // but the module system exposes it. Quick test: the archive page
+          // component calls workspaces.removeSession; if it's undefined the
+          // button silently fails. Log the error for diagnostics.
+        }
         refreshBranchBadge()
       })()`).catch(() => {}),
     ])
@@ -3851,8 +4495,12 @@ if (!gotLock) {
       ensureMcpFiles()
       ensureGlmSkill()
       // ensureAquaPlugin()   // removed: incompatible with 0.1.2-alpha.1
-      // ensureWebUiFamily()  // removed: incompatible with 0.1.2-alpha.1
+      ensureWebUiFamily()  // harness-extras 内置设置分区（MCP/技能/子代理）依赖此行注册
       await startDialogServer()
+      // Client-plugin bundles are served with immutable cache headers; clear
+      // the Chromium disk cache every launch so edited plugin code always
+      // reaches the page instead of a stale cached copy.
+      await session.defaultSession.clearCache()
       const url = await startServer()
       await createWindow()
       createTray()
@@ -3879,6 +4527,7 @@ if (!gotLock) {
   app.on('before-quit', () => {
     if (quitting) return
     quitting = true
+    teardownPtySessions()
     if (consoleWatchdog !== null) {
       consoleWatchdog.kill()
       consoleWatchdog = null
