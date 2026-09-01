@@ -15,4 +15,3 @@ import { type ReactNode } from 'react';
 export declare function McpSection(): ReactNode;
 export declare function SkillsSection(): ReactNode;
 export declare function SubagentsSection(): ReactNode;
-//# sourceMappingURL=HarnessSection.d.ts.map

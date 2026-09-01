@@ -1,0 +1,39 @@
+diff --git a/lib/client.js b/lib/client.js
+index 4d0344872b10c9c02189b9146453ae33fcf072fc..fd947a64cd1745a04c4dd278aaee21128c80ff34 100644
+--- a/lib/client.js
++++ b/lib/client.js
+@@ -86,6 +86,34 @@ window.__ModuleLoader__.load({
+ 				className: SettingsRoot_module_css_default.navIcon,
+ 				size: 16
+ 			});
++			if (id === "mcp-servers") return (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconApiOutline14, {
++				className: SettingsRoot_module_css_default.navIcon,
++				size: 16
++			});
++			if (id === "skills") return (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconSkillOutline16, {
++				className: SettingsRoot_module_css_default.navIcon,
++				size: 16
++			});
++			if (id === "subagents") return (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconUserOutline16, {
++				className: SettingsRoot_module_css_default.navIcon,
++				size: 16
++			});
++			if (id === "commands") return (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconChecklistOutline14, {
++				className: SettingsRoot_module_css_default.navIcon,
++				size: 16
++			});
++			if (id === "hooks") return (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconLinkOutline16, {
++				className: SettingsRoot_module_css_default.navIcon,
++				size: 16
++			});
++			if (id === "git") return (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconBranchOutline16, {
++				className: SettingsRoot_module_css_default.navIcon,
++				size: 16
++			});
++			if (id === "index") return (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconDatabaseOutline16, {
++				className: SettingsRoot_module_css_default.navIcon,
++				size: 16
++			});
+ 			return (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconSettingsOutline16, {
+ 				className: SettingsRoot_module_css_default.navIcon,
+ 				size: 16

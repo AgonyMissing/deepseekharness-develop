@@ -70,4 +70,3 @@ export function apply(ctx) {
         label: () => '索引库',
     }, IndexSection));
 }
-//# sourceMappingURL=index.js.map

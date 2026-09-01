@@ -4067,6 +4067,14 @@ async function injectBackgroundWhenReady(win) {
             if (b.querySelector('svg') === null) continue
             return b
           }
+          // 0.1.2-alpha.3 sidebar: the workspace project chip is a span
+          // (not a button); attach the branch badge to its title span.
+          var proj = document.querySelector('[class*="projectText"]')
+          if (proj !== null) {
+            var title = proj.querySelector('[class*="title"]') || proj
+            var pr = title.getBoundingClientRect()
+            if (pr.width > 0 && pr.top >= 0 && pr.top <= 320) return title
+          }
           return null
         }
 

@@ -9,3 +9,6 @@ clipboard-check.png
 *.log
 Thumbs.db
 .DS_Store
+.dsh-src-build/
+resources/dsh/vendor/harness-extras/node_modules/
+resources/dsh/vendor/@deepseek-ai.old-alpha1/

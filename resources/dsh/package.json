@@ -4,9 +4,13 @@
   "private": true,
   "description": "Bundled DeepSeek Harness runtime (installed artifacts; do not edit)",
   "dependencies": {
-    "@deepseek-ai/dsh": "0.1.2-alpha.2",
-    "@deepseek-ai/dsh-client-ui-harness-extras": "file:vendor/@deepseek-ai/dsh-client-ui-harness-extras",
-    "@deepseek-ai/dsh-client-ui-primitives": "0.1.2-alpha.2",
-    "@deepseek-ai/dsh-client-ui-slots": "0.1.2-alpha.2"
+    "@deepseek-ai/dsh": "0.1.2-alpha.3",
+    "@deepseek-ai/dsh-client-ui-harness-extras": "file:vendor/harness-extras"
+  },
+  "pnpm": {
+    "patchedDependencies": {
+      "@deepseek-ai/dsh-client-ui-settings-general@0.1.2-alpha.3": "patches/@deepseek-ai__dsh-client-ui-settings-general@0.1.2-alpha.3.patch",
+      "@deepseek-ai/dsh-win32-process@0.1.2-alpha.3": "patches/@deepseek-ai__dsh-win32-process@0.1.2-alpha.3.patch"
+    }
   }
 }

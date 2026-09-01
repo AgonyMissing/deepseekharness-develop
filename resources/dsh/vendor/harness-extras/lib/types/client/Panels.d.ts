@@ -29,4 +29,3 @@ export declare function TerminalOverlay(): ReactNode;
  */
 export declare function IndexSection(): ReactNode;
 export declare function ArchiveSection(): ReactNode;
-//# sourceMappingURL=Panels.d.ts.map
