@@ -81,17 +81,11 @@ if (!globalThis.__dshConsoleHideShim) {
           args[1] = ['cmd.exe', '/d', '/s', '/c', command]
           opts.shell = false
           command = LAUNCHER
-        } else if (isSandboxRunnerSpawn(command, args[1])) {
-          _log(`  → LAUNCHER routing (spawn sandbox): ${command}`)
+        } else if (isSandboxRunnerSpawn(command, args[1]) || isConsoleShell(command)) {
+          _log(`  → LAUNCHER routing (spawn): ${command}`)
           args[0] = LAUNCHER
           args[1] = [command, ...(Array.isArray(args[1]) ? args[1] : [])]
           command = LAUNCHER
-        } else if (isConsoleShell(command)) {
-          // PowerShell/cmd: suppress console via windowsHide (the launcher
-          // itself briefly creates a visible console before suppressing it,
-          // which causes the black-window flash). windowsHide + stdio pipe
-          // is sufficient on modern Windows with ConPTY.
-          _log(`  → windowsHide only (spawn): ${command}`)
         }
       }
       // spawnSync / execFile / execFileSync call libuv directly, bypassing
