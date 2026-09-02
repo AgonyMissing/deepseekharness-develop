@@ -3101,6 +3101,27 @@ const TOOLTIP_FIX_JS = `(() => {
   window.addEventListener('resize', reposition)
 })()`
 
+/**
+ * Hide duplicate tooltip/toast bubbles (duplicate-UI patch): when the kernel
+ * mounts the same tooltip/toast text more than once, keep only the first and
+ * suppress the rest so the UI stops showing stacked duplicate popups.
+ */
+function injectDedupTooltips(win) {
+  return win.webContents.executeJavaScript(`(() => {
+    function dedupBubbles() {
+      var seen = {}
+      document.querySelectorAll('[role="tooltip"], [class*="toast"]').forEach(function(el) {
+        var t = (el.textContent || '').trim()
+        if (!t) return
+        if (seen[t]) el.style.display = 'none'
+        else seen[t] = true
+      })
+    }
+    new MutationObserver(dedupBubbles).observe(document.body, { childList: true, subtree: true })
+    dedupBubbles()
+  })()`).catch(() => {})
+}
+
 async function injectEffortSlider(win, wait = false) {
   try {
     await win.webContents.executeJavaScript(`new Promise((resolve) => {
@@ -3714,6 +3735,7 @@ async function restartServerAndReload() {
       await mainWindow.loadURL(url)
       await injectThemeGuard(mainWindow)
       void injectBackgroundWhenReady(mainWindow)
+      void injectDedupTooltips(mainWindow)
       void injectEffortSlider(mainWindow)
     }
   } catch (error) {
@@ -4473,6 +4495,7 @@ async function createWindow() {
   mainWindow.webContents.on('did-finish-load', () => {
     void injectThemeGuard(mainWindow)
     void injectBackgroundWhenReady(mainWindow)
+    void injectDedupTooltips(mainWindow)
     void injectEffortSlider(mainWindow)
   })
 
@@ -4492,6 +4515,7 @@ async function createWindow() {
     await runSmoke(mainWindow)
   } else {
     void injectBackgroundWhenReady(mainWindow)
+    void injectDedupTooltips(mainWindow)
     void injectEffortSlider(mainWindow)
   }
 }
