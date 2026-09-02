@@ -64,7 +64,8 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "DeepSeek Harness",
-      "artifactName": "DeepSeek-Harness-Setup-${version}.exe"
+      "artifactName": "DeepSeek-Harness-Setup-${version}.exe",
+      "include": "build/installer.nsh"
     }
   }
 }
