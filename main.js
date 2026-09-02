@@ -4008,6 +4008,10 @@ async function injectBackgroundWhenReady(win) {
     await Promise.all([
       win.webContents.insertCSS(BACKGROUND_CSS),
       win.webContents.executeJavaScript(THEME_GUARD).catch(() => {}),
+      // ── alpha.2-style git UI: hero branch chip + wide Git 图谱 modal ──
+      win.webContents.executeJavaScript(
+        fs.readFileSync(path.join(__dirname, 'resources', 'git-ui.js'), 'utf8'),
+      ).catch(() => {}),
       // ── 0.1.2-alpha.1 duplicate UI fix ──
       // Instant MutationObserver: hide duplicate tooltips on DOM change
       win.webContents.executeJavaScript(`(() => {
