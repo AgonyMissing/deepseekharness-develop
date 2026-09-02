@@ -49,15 +49,12 @@ const CONHOST_DELEGATION_TERMINAL = '{B23D10C0-E52E-411E-9D5B-C09FDF709C7D}'
 /** Tray-only start: boot with no visible window (--tray flag or desktop.json
  * startHidden=true). The local server and remote tunnel keep running, and the
  * tray icon remains the way back into the window. */
-// Ensure every Node child process (MCP servers, background workers, etc.)
-// loads the console-hide-shim via NODE_OPTIONS so they route console shells
-// through hidden-console-launcher and suppress Windows console flashes.
-if (!process.env.NODE_OPTIONS || !process.env.NODE_OPTIONS.includes('console-hide-shim')) {
-  const shimArg = '--require=' + path.join(__dirname, 'resources', 'console-hide-shim.cjs')
-  process.env.NODE_OPTIONS = process.env.NODE_OPTIONS
-    ? process.env.NODE_OPTIONS + ' ' + shimArg
-    : shimArg
-}
+// NOTE: the console-hide-shim is deliberately NOT injected via NODE_OPTIONS.
+// NODE_OPTIONS splits on spaces, and the installed path may contain spaces
+// ("...\DeepSeek Harness\..."), which truncates --require and crashes every
+// child at startup. The shim travels as a single argv token instead: the dsh
+// server is spawned with `--require <shim>` below, and the shim injects the
+// same token into every descendant Node/Electron child it spawns.
 
 const HIDDEN_START = process.argv.includes('--tray') || (() => {
   try {
