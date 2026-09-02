@@ -1,6 +1,6 @@
 {
   "name": "deepseek-harness-desktop",
-  "version": "2.0.0-alpha.2",
+  "version": "2.0.0-alpha.4",
   "description": "DeepSeek Harness desktop app: the dsh web UI in an installable Windows shell, with the DeepSeek background artwork.",
   "main": "main.js",
   "author": "powerdog996",
@@ -28,6 +28,7 @@
       "main.js",
       "package.json",
       "resources/**",
+      "!resources/dsh/vendor/**",
       "build/icon.png"
     ],
     "asar": false,
