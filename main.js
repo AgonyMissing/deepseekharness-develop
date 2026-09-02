@@ -4080,7 +4080,19 @@ async function injectBackgroundWhenReady(win) {
 
         function showBadge(anchor, text) {
           if (anchor === null || anchor.parentElement === null) return
-          var badge = anchor.parentElement.querySelector('.dshx-branch-badge')
+          var parent = anchor.parentElement
+          // 0.1.2-alpha.3 sidebar: the workspace chip is a column-flex span;
+          // lay the title + badge out inline so it never wraps below the name.
+          if (getComputedStyle(parent).flexDirection === 'column') {
+            parent.style.flexDirection = 'row'
+            parent.style.alignItems = 'center'
+            parent.style.gap = '6px'
+            anchor.style.minWidth = '0'
+            anchor.style.overflow = 'hidden'
+            anchor.style.textOverflow = 'ellipsis'
+            anchor.style.flex = '0 1 auto'
+          }
+          var badge = parent.querySelector('.dshx-branch-badge')
           if (text === '') {
             if (badge !== null) badge.remove()
             return
@@ -4089,11 +4101,12 @@ async function injectBackgroundWhenReady(win) {
             badge = document.createElement('button')
             badge.type = 'button'
             badge.className = 'dshx-branch-badge'
-            badge.style.cssText = 'display:inline-flex;align-items:center;gap:4px;margin-left:10px;padding:2px 10px;'
-              + 'font-size:12px;border-radius:999px;cursor:pointer;'
+            badge.style.cssText = 'display:inline-flex;align-items:center;gap:4px;flex:none;white-space:nowrap;'
+              + 'margin-left:2px;padding:1px 8px;'
+              + 'font-size:11px;border-radius:999px;cursor:pointer;'
               + 'border:1px solid var(--dsw-alias-border-l2,rgba(121,126,145,.3));'
               + 'color:var(--dsw-alias-label-secondary,#686c75);background:transparent;'
-            anchor.parentElement.insertBefore(badge, anchor.nextSibling)
+            parent.insertBefore(badge, anchor.nextSibling)
             badge.addEventListener('click', function (ev) {
               ev.stopPropagation()
               togglePanel(badge)
