@@ -269,8 +269,6 @@ function copyDirSync(from, to) {
  * the profile node_modules (installed by this shell or bundled resources).
  */
 const WEBUI_FAMILY_ROWS = [
-  // Desktop-harness settings sections: MCP servers / skills / subagents.
-  ['harness-extras', '@deepseek-ai/dsh-client-ui-harness-extras'],
 ]
 
 /**
@@ -3997,6 +3995,8 @@ async function runSmoke(win) {
 
 /** Wait for the real UI, then bring the background artwork in. */
 async function injectBackgroundWhenReady(win) {
+  // 纯净版：不注入自定义背景/品牌/git UI，仅保留原生界面与滑块功能。
+  return
   try {
     await win.webContents.executeJavaScript(`new Promise((resolve) => {
       const check = () => {
@@ -4515,12 +4515,9 @@ if (!gotLock) {
       seedDshHome()
       seedChibiSprite()  // chibi thumb for the reasoning-effort slider
       cleanupLegacyPlugins()
-      ensureHarnessExtras()
       // seedWallpapers()  // removed: wallpaper management disabled
       ensureMcpFiles()
-      ensureGlmSkill()
       // ensureAquaPlugin()   // removed: incompatible with 0.1.2-alpha.1
-      ensureWebUiFamily()  // harness-extras 内置设置分区（MCP/技能/子代理）依赖此行注册
       await startDialogServer()
       // Client-plugin bundles are served with immutable cache headers; clear
       // the Chromium disk cache every launch so edited plugin code always
