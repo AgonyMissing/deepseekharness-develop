@@ -5,6 +5,9 @@ settings:
   excludeLinksFromLockfile: false
 
 patchedDependencies:
+  '@deepseek-ai/dsh-client-ui-settings-general@0.1.2-rc.1':
+    hash: 2xzm7xi2yoz4suzyuiv6u2ziga
+    path: patches/@deepseek-ai__dsh-client-ui-settings-general@0.1.2-rc.1.patch
   '@deepseek-ai/dsh-win32-process@0.1.2-rc.1':
     hash: yx3xdtzgyduohibych4v72q3je
     path: patches/@deepseek-ai__dsh-win32-process@0.1.2-rc.1.patch
@@ -1266,7 +1269,7 @@ packages:
       '@deepseek-ai/cordis': 4.0.2(@deepseek-ai/cordis-plugin-include@1.0.7)(@deepseek-ai/cordis-plugin-loader@1.0.3)
     dev: false
 
-  /@deepseek-ai/dsh-client-ui-settings-general@0.1.2-rc.1(@deepseek-ai/cordis@4.0.2):
+  /@deepseek-ai/dsh-client-ui-settings-general@0.1.2-rc.1(patch_hash=2xzm7xi2yoz4suzyuiv6u2ziga)(@deepseek-ai/cordis@4.0.2):
     resolution: {integrity: sha512-qJfUARsCQ6uqwk2dPrspw30JKUrzTXwPtFcoSCra9ZNTweNcS60FxqwtoCA64//PZ2DMxD/OeuOYQQh3HnniFA==}
     peerDependencies:
       '@deepseek-ai/cordis': ^4.0.2
@@ -1275,6 +1278,7 @@ packages:
       '@deepseek-ai/schemastery': 3.18.2
       clsx: 2.1.1
     dev: false
+    patched: true
 
   /@deepseek-ai/dsh-client-ui-settings-models@0.1.2-rc.1(@deepseek-ai/cordis@4.0.2):
     resolution: {integrity: sha512-r4ErsBy1NE9QWqZmFyxoBFQhCc+pymmc62PFN7PBxFAX85JRJ3asWwjZPpgXW+y7AkqNWy1JVJqlLdf7W5pCIA==}
@@ -3884,7 +3888,7 @@ packages:
       '@deepseek-ai/dsh-client-ui-schedule': 0.1.2-rc.1(@deepseek-ai/cordis@4.0.2)
       '@deepseek-ai/dsh-client-ui-session': 0.1.2-rc.1(@deepseek-ai/cordis@4.0.2)
       '@deepseek-ai/dsh-client-ui-settings': 0.1.2-rc.1(@deepseek-ai/cordis@4.0.2)
-      '@deepseek-ai/dsh-client-ui-settings-general': 0.1.2-rc.1(@deepseek-ai/cordis@4.0.2)
+      '@deepseek-ai/dsh-client-ui-settings-general': 0.1.2-rc.1(patch_hash=2xzm7xi2yoz4suzyuiv6u2ziga)(@deepseek-ai/cordis@4.0.2)
       '@deepseek-ai/dsh-client-ui-settings-models': 0.1.2-rc.1(@deepseek-ai/cordis@4.0.2)
       '@deepseek-ai/dsh-client-ui-settings-plugin-inventory': 0.1.2-rc.1(@deepseek-ai/cordis@4.0.2)
       '@deepseek-ai/dsh-client-ui-settings-plugins': 0.1.2-rc.1(@deepseek-ai/cordis@4.0.2)
