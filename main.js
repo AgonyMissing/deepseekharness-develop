@@ -266,6 +266,9 @@ function copyDirSync(from, to) {
  * the profile node_modules (installed by this shell or bundled resources).
  */
 const WEBUI_FAMILY_ROWS = [
+  // Desktop-harness settings sections: MCP servers / skills / subagents /
+  // commands / hooks / git / index.
+  ['harness-extras', '@deepseek-ai/dsh-client-ui-harness-extras'],
 ]
 
 /**
@@ -3122,6 +3125,13 @@ function injectDedupTooltips(win) {
   })()`).catch(() => {})
 }
 
+/** Inject the harness git UI (hero branch chip + wide Git 图谱 modal). */
+function injectGitUi(win) {
+  return win.webContents.executeJavaScript(
+    fs.readFileSync(path.join(__dirname, 'resources', 'git-ui.js'), 'utf8'),
+  ).catch(() => {})
+}
+
 async function injectEffortSlider(win, wait = false) {
   try {
     await win.webContents.executeJavaScript(`new Promise((resolve) => {
@@ -3736,6 +3746,7 @@ async function restartServerAndReload() {
       await injectThemeGuard(mainWindow)
       void injectBackgroundWhenReady(mainWindow)
       void injectDedupTooltips(mainWindow)
+      void injectGitUi(mainWindow)
       void injectEffortSlider(mainWindow)
     }
   } catch (error) {
@@ -4496,6 +4507,7 @@ async function createWindow() {
     void injectThemeGuard(mainWindow)
     void injectBackgroundWhenReady(mainWindow)
     void injectDedupTooltips(mainWindow)
+    void injectGitUi(mainWindow)
     void injectEffortSlider(mainWindow)
   })
 
@@ -4516,6 +4528,7 @@ async function createWindow() {
   } else {
     void injectBackgroundWhenReady(mainWindow)
     void injectDedupTooltips(mainWindow)
+    void injectGitUi(mainWindow)
     void injectEffortSlider(mainWindow)
   }
 }
@@ -4536,8 +4549,10 @@ if (!gotLock) {
       seedDshHome()
       seedChibiSprite()  // chibi thumb for the reasoning-effort slider
       cleanupLegacyPlugins()
+      ensureHarnessExtras()
       // seedWallpapers()  // removed: wallpaper management disabled
       ensureMcpFiles()
+      ensureWebUiFamily()
       // ensureAquaPlugin()   // removed: incompatible with 0.1.2-alpha.1
       await startDialogServer()
       // Client-plugin bundles are served with immutable cache headers; clear
